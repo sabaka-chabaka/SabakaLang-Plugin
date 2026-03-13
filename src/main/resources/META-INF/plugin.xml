@@ -1,0 +1,13 @@
+<idea-plugin>
+    <id>com.sabakachabaka.sabakalang</id>
+
+    <name>SabakaLang</name>
+
+    <vendor url="https://github.com/sabaka-chabaka">sabaka-chabaka</vendor>
+
+    <description><![CDATA[
+        Simple plugin for support fresh SabakaLang
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+</idea-plugin>
