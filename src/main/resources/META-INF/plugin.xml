@@ -10,4 +10,33 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType name="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaFileType" fieldName="INSTANCE" language="SabakaLang" extensions="sabaka"/>
+        <lang.parserDefinition language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.parser.SabakaParserDefinition"/>
+        <lang.syntaxHighlighterFactory language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.highlighting.SabakaSyntaxHighlighterFactory"/>
+        <colorSettingsPage implementation="com.sabakachabaka.sabakalang.highlighting.SabakaColorSettingsPage"/>
+        <annotator language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.annotator.SabakaAnnotator"/>
+        <lang.braceMatcher language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaBraceMatcher"/>
+        <lang.commenter language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaCommenter"/>
+        <lang.foldingBuilder language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.folding.SabakaFoldingBuilder"/>
+        <lang.psiStructureViewFactory language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.structure.SabakaStructureViewFactory"/>
+        <completion.contributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.completion.SabakaCompletionContributor"/>
+        <lang.findUsagesProvider language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.find.SabakaFindUsagesProvider"/>
+        <psi.referenceContributor language="SabakaLang" implementation="com.sabakachabaka.sabakalang.SabakaReferenceContributor"/>
+        <lang.formatter language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.formatter.SabakaFormattingModelBuilder"/>
+        <codeStyleSettingsProvider implementation="com.sabakachabaka.sabakalang.formatter.SabakaCodeStyleSettingsProvider"/>
+        <langCodeStyleSettingsProvider implementation="com.sabakachabaka.sabakalang.formatter.SabakaLanguageCodeStyleSettingsProvider"/>
+        <configurationType implementation="com.sabakachabaka.sabakalang.run.SabakaRunConfigurationType"/>
+        <runConfigurationProducer implementation="com.sabakachabaka.sabakalang.run.SabakaRunConfigurationProducer"/>
+        <runLineMarkerContributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.run.SabakaRunLineMarkerContributor"/>
+        <lang.documentationProvider language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaDocumentationProvider"/>
+        <internalFileTemplate name="SabakaLang File"/>
+        <notificationGroup id="SabakaLang" displayType="BALLOON"/>
+    </extensions>
+    <actions>
+        <action id="SabakaLang.NewFile" class="com.sabakachabaka.sabakalang.actions.NewSabakaFileAction" text="SabakaLang File" description="Create a new .sabaka file">
+            <add-to-group group-id="NewGroup" anchor="after" relative-to-action="NewFile"/>
+        </action>
+    </actions>
 </idea-plugin>
