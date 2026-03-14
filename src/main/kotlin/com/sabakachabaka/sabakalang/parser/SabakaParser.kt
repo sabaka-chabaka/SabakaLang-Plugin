@@ -472,22 +472,47 @@ private class ParseContext(private val b: PsiBuilder) {
     }
 
     private fun parsePostfix() {
+        // PsiBuilder precede() pattern for left-recursive postfix chains.
+        // We open an outer marker BEFORE parsing the primary, then after each
+        // postfix suffix we close it as MEMBER_ACCESS_EXPR / ARRAY_ACCESS_EXPR
+        // and immediately open a new outer marker for the next suffix.
+        //
+        //  ab.foo().bar[0]
+        //  └─ MEMBER_ACCESS_EXPR
+        //      ├─ MEMBER_ACCESS_EXPR        (ab.foo())
+        //      │   ├─ VAR_EXPR(ab)
+        //      │   ├─ DOT
+        //      │   ├─ IDENTIFIER(foo)
+        //      │   └─ ARG_LIST()
+        //      ├─ DOT
+        //      ├─ IDENTIFIER(bar)
+        //      └─ [0]  → ARRAY_ACCESS_EXPR wraps the above
+
+        var lhs = mark()   // open marker before primary
         parsePrimary()
+        // lhs is now open and wraps the primary; we'll either keep it as-is
+        // (no postfix) by dropping it, or use it to build a postfix node.
+
         while (true) {
             when {
-                at(TT.DOT) -> {
-                    advance(); expect(TT.IDENTIFIER)
+                at(TT.DOT) || at(TT.COLONCOLON) -> {
+                    advance() // consume . or ::
+                    if (at(TT.IDENTIFIER)) advance() // member name
                     if (at(TT.LPAREN)) parseArgList()
-                }
-                at(TT.COLONCOLON) -> {
-                    advance()
-                    if (at(TT.IDENTIFIER)) advance()
-                    if (at(TT.LPAREN)) parseArgList()
+                    lhs.done(ET.MEMBER_ACCESS_EXPR)
+                    // Open new outer marker for possible further chaining
+                    lhs = b.mark()
                 }
                 at(TT.LBRACKET) -> {
                     advance(); parseExpr(); expect(TT.RBRACKET)
+                    lhs.done(ET.ARRAY_ACCESS_EXPR)
+                    lhs = b.mark()
                 }
-                else -> break
+                else -> {
+                    // No more postfix — drop the dangling open marker
+                    lhs.drop()
+                    break
+                }
             }
         }
     }

@@ -181,24 +181,25 @@ class SabakaAnnotator : Annotator {
         symbols: SymbolTable,
         holder: AnnotationHolder
     ) {
+        // MEMBER_ACCESS_EXPR structure (from parsePostfix):
+        //   child[0] = object expr  (VAR_EXPR | SUPER_EXPR | MEMBER_ACCESS_EXPR | ...)
+        //   child[1] = DOT or COLONCOLON
+        //   child[2] = IDENTIFIER  (member name)
+        //   child[3] = ARG_LIST    (optional — present when it's a call)
         val children = element.node.getChildren(null)
-            .filter { it.psi.textLength > 0 }  // skip empty nodes
+            .filter { it.psi.textLength > 0 }
 
-        // Find the separator (DOT or COLONCOLON)
-        val sepIdx = children.indexOfFirst {
-            it.elementType == SabakaTokenTypes.DOT ||
-            it.elementType == SabakaTokenTypes.COLONCOLON
-        }
-        if (sepIdx < 1 || sepIdx + 1 >= children.size) return
+        if (children.size < 3) return
 
-        val objNode   = children[sepIdx - 1]   // node before the dot
-        val afterSep  = children.drop(sepIdx + 1)
-
-        // Member name = first IDENTIFIER after separator (skip ARG_LIST etc.)
-        val memberNameNode = afterSep.firstOrNull {
+        val objNode        = children[0]   // the object expression
+        val sepNode        = children[1]   // DOT or COLONCOLON
+        val memberNameNode = children.drop(2).firstOrNull {
             it.elementType == SabakaTokenTypes.IDENTIFIER
         } ?: return
         val memberName = memberNameNode.text
+
+        if (sepNode.elementType != SabakaTokenTypes.DOT &&
+            sepNode.elementType != SabakaTokenTypes.COLONCOLON) return
 
         val isSuper = objNode.elementType == SabakaElementTypes.SUPER_EXPR
         val currentClass = enclosingClassName(element)
