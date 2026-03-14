@@ -86,14 +86,32 @@ class SabakaClassElement(cls: SabakaClassDecl) : PsiTreeElementBase<SabakaClassD
         val children = mutableListOf<StructureViewTreeElement>()
         body.children.forEach { child ->
             when (child) {
-                is SabakaFieldDecl  -> child.name?.let { children.add(SabakaLeafElement(it, AllIcons.Nodes.Field, child)) }
+                is SabakaFieldDecl  -> child.name?.let {
+                    val icon = fieldIcon(child.node)
+                    children.add(SabakaLeafElement(it, icon, child))
+                }
                 is SabakaFuncDecl   -> children.add(SabakaFuncElement(child))
-                is SabakaMethodDecl -> child.name?.let { children.add(SabakaLeafElement(it, AllIcons.Nodes.Method, child)) }
+                is SabakaMethodDecl -> child.name?.let {
+                    val icon = methodIcon(child.node)
+                    children.add(SabakaLeafElement(it, icon, child))
+                }
                 else -> {}
             }
         }
         return children
     }
+}
+
+private fun methodIcon(node: com.intellij.lang.ASTNode): Icon = when (node.firstChildNode?.elementType) {
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PRIVATE   -> AllIcons.Nodes.Private
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PROTECTED -> AllIcons.Nodes.Protected
+    else -> AllIcons.Nodes.Method
+}
+
+private fun fieldIcon(node: com.intellij.lang.ASTNode): Icon = when (node.firstChildNode?.elementType) {
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PRIVATE   -> AllIcons.Nodes.Private
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PROTECTED -> AllIcons.Nodes.Protected
+    else -> AllIcons.Nodes.Field
 }
 
 // ── Struct ────────────────────────────────────────────────────────────────────

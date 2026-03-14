@@ -131,6 +131,8 @@ class SabakaMainCompletionProvider : CompletionProvider<CompletionParameters>() 
     // ── Member completions after `.` ──────────────────────────────────────────
 
     private fun addMemberCompletions(file: SabakaFile, result: CompletionResultSet) {
+        val symbols = com.sabakachabaka.sabakalang.annotator.SymbolTable.of(file)
+
         // .length is always available on arrays and strings
         result.addElement(
             LookupElementBuilder.create("length")
@@ -139,35 +141,27 @@ class SabakaMainCompletionProvider : CompletionProvider<CompletionParameters>() 
                 .withTailText(" (array/string)", true)
         )
 
-        // Class method and field names
-        PsiTreeUtil.findChildrenOfType(file, SabakaClassDecl::class.java).forEach { cls ->
-            val body = cls.getBody() ?: return@forEach
-            PsiTreeUtil.getChildrenOfType(body, SabakaFieldDecl::class.java)?.forEach { f ->
-                f.name?.let { n ->
-                    result.addElement(LookupElementBuilder.create(n)
-                        .withIcon(AllIcons.Nodes.Field)
-                        .withTypeText("field of ${cls.name}"))
-                }
-            }
-            PsiTreeUtil.getChildrenOfType(body, SabakaFuncDecl::class.java)?.forEach { m ->
-                m.name?.let { n ->
-                    result.addElement(LookupElementBuilder.create(n)
-                        .withIcon(AllIcons.Nodes.Method)
-                        .withTypeText("method of ${cls.name}")
-                        .withInsertHandler(ArgsParensHandler))
-                }
+        // All classes — show inherited + own members, respecting access
+        for (clsName in symbols.classes) {
+            symbols.allMembersOf(clsName).forEach { m ->
+                if (m.access == com.sabakachabaka.sabakalang.annotator.AccessLevel.PRIVATE) return@forEach
+                val icon = if (m.kind == "method") AllIcons.Nodes.Method else AllIcons.Nodes.Field
+                val typeText = "${m.access.name.lowercase()} ${m.kind} of $clsName"
+                result.addElement(
+                    LookupElementBuilder.create(m.name)
+                        .withIcon(icon)
+                        .withTypeText(typeText)
+                        .let { if (m.kind == "method") it.withInsertHandler(ArgsParensHandler) else it }
+                )
             }
         }
 
-        // Struct fields
-        PsiTreeUtil.findChildrenOfType(file, SabakaStructDecl::class.java).forEach { st ->
-            val body = st.getBody() ?: return@forEach
-            PsiTreeUtil.getChildrenOfType(body, SabakaFieldDecl::class.java)?.forEach { f ->
-                f.name?.let { n ->
-                    result.addElement(LookupElementBuilder.create(n)
-                        .withIcon(AllIcons.Nodes.Field)
-                        .withTypeText("field of ${st.name}"))
-                }
+        // Structs
+        for (stName in symbols.structs) {
+            symbols.allMembersOf(stName).forEach { m ->
+                result.addElement(LookupElementBuilder.create(m.name)
+                    .withIcon(AllIcons.Nodes.Field)
+                    .withTypeText("field of $stName"))
             }
         }
     }

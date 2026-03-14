@@ -14,25 +14,24 @@ import com.sabakachabaka.sabakalang.psi.*
  * Semantic annotator for SabakaLang.
  *
  * ── Semantic highlighting ─────────────────────────────────────────────────────
- *   • Function/method declaration names → FUNC_DECL
- *   • Class / struct / enum names       → CLASS/STRUCT/ENUM
- *   • Parameters                        → PARAM
- *   • Local variables                   → LOCAL_VAR
- *   • Built-in function calls           → BUILTIN_CALL
- *   • User function calls               → FUNC_CALL
+ *   • Function/method decl names    → FUNC_DECL
+ *   • Class / struct / enum names   → CLASS / STRUCT / ENUM color
+ *   • Parameters                    → PARAM
+ *   • Local variables               → LOCAL_VAR
+ *   • Built-in calls                → BUILTIN_CALL
+ *   • User function / method calls  → FUNC_CALL
  *
- * ── Diagnostics (ERROR) ───────────────────────────────────────────────────────
- *   • Wrong argument count for built-in functions
- *   • Calling unknown function (not builtin, not user-defined, not class/struct)
+ * ── Diagnostics ───────────────────────────────────────────────────────────────
+ *   • Wrong argument count for built-ins and user functions
+ *   • Calling an unknown function / constructor
+ *   • Accessing private member from outside the class
+ *   • Accessing protected member from non-derived class
+ *   • Accessing private/protected member from top-level code
  *   • Class does not implement all interface methods
- *   • Duplicate top-level function name
- *   • `super` used outside class
- *   • `override` without matching base-class method
- *
- * NOTE: Unresolved variable checks are intentionally omitted.
- * SabakaLang allows top-level statements, foreach vars, switch vars, and
- * generic type parameters — a full scope resolver would be needed to avoid
- * constant false positives. Function/call resolution is precise enough to be useful.
+ *   • Duplicate top-level function
+ *   • override without matching base method
+ *   • super used outside class
+ *   • super::method where base class has no such method
  */
 class SabakaAnnotator : Annotator {
 
@@ -46,45 +45,53 @@ class SabakaAnnotator : Annotator {
 
             is SabakaFuncDecl -> {
                 highlightName(element, SabakaColors.FUNC_DECL, holder)
-                if (element.parent is SabakaFile) {
-                    checkDuplicateTopLevelFunc(element, file, holder)
-                }
+                if (element.parent is SabakaFile) checkDuplicateTopLevelFunc(element, file, holder)
                 checkOverrideValid(element, symbols, holder)
             }
-
-            is SabakaMethodDecl -> highlightName(element, SabakaColors.FUNC_DECL, holder)
-            is SabakaClassDecl  -> {
+            is SabakaMethodDecl  -> highlightName(element, SabakaColors.FUNC_DECL, holder)
+            is SabakaClassDecl   -> {
                 highlightName(element, SabakaColors.CLASS_NAME, holder)
                 checkInterfaceImplementation(element, symbols, holder)
             }
-            is SabakaStructDecl -> highlightName(element, SabakaColors.STRUCT_NAME, holder)
-            is SabakaEnumDecl   -> highlightName(element, SabakaColors.ENUM_NAME, holder)
-            is SabakaParam      -> highlightName(element, SabakaColors.PARAM, holder)
+            is SabakaStructDecl  -> highlightName(element, SabakaColors.STRUCT_NAME, holder)
+            is SabakaEnumDecl    -> highlightName(element, SabakaColors.ENUM_NAME, holder)
+            is SabakaParam       -> highlightName(element, SabakaColors.PARAM, holder)
             is SabakaVarDeclStmt -> highlightName(element, SabakaColors.LOCAL_VAR, holder)
 
             // ── Composite nodes ───────────────────────────────────────────
 
             is SabakaCompositeElement -> when (element.node.elementType) {
-                SabakaElementTypes.CALL_EXPR  -> annotateCall(element, symbols, holder)
-                SabakaElementTypes.SUPER_EXPR -> checkSuperContext(element, holder)
+                SabakaElementTypes.CALL_EXPR         -> annotateCall(element, symbols, holder)
+                SabakaElementTypes.MEMBER_ACCESS_EXPR -> annotateMemberAccess(element, symbols, holder)
+                SabakaElementTypes.SUPER_EXPR         -> checkSuperContext(element, symbols, holder)
                 else -> {}
             }
         }
     }
 
-    // ── Semantic highlight helpers ────────────────────────────────────────────
+    // ── Highlight helper ──────────────────────────────────────────────────────
 
     private fun highlightName(
         el: SabakaNamedElement,
         color: com.intellij.openapi.editor.colors.TextAttributesKey,
         holder: AnnotationHolder
     ) {
-        el.nameIdentifier?.let { id ->
+        el.nameIdentifier?.let {
             holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                .range(id.textRange)
-                .textAttributes(color)
-                .create()
+                .range(it.textRange).textAttributes(color).create()
         }
+    }
+
+    // ── Enclosing class name ──────────────────────────────────────────────────
+
+    private fun enclosingClassName(element: PsiElement): String? {
+        var p = element.parent
+        while (p != null) {
+            if (p is SabakaClassDecl) return p.name
+            if (p is SabakaFile) return null
+            p = p.parent
+        }
+        return null
     }
 
     // ── Call expression ───────────────────────────────────────────────────────
@@ -99,7 +106,6 @@ class SabakaAnnotator : Annotator {
         val name = nameNode.text
         val nameRange = nameNode.textRange
 
-        // Count arguments (non-punctuation children of ARG_LIST)
         val argCount = element.node.findChildByType(SabakaElementTypes.ARG_LIST)
             ?.getChildren(null)
             ?.count { ch ->
@@ -109,40 +115,40 @@ class SabakaAnnotator : Annotator {
                 ch.psi.textLength > 0
             } ?: 0
 
+        // Is this a method call on an object? (parent is CALL_EXPR of a MEMBER_ACCESS_EXPR)
+        // If so, skip — we handle it in annotateMemberAccess
+        val parentType = element.node.treeParent?.elementType
+        if (parentType == SabakaElementTypes.MEMBER_ACCESS_EXPR) return
+
         when {
             // ── Built-in ──────────────────────────────────────────────────
             name in SabakaBuiltins.GLOBAL_NAMES -> {
                 val bi = SabakaBuiltins.GLOBAL_BY_NAME[name]!!
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
                     .range(nameRange).textAttributes(SabakaColors.BUILTIN_CALL).create()
-
                 val expected = bi.params.size
-                // print() is variadic (accepts any single value, type doesn't matter)
                 if (name != "print" && argCount != expected) {
-                    val paramStr = if (bi.params.isNotEmpty())
+                    val pStr = if (bi.params.isNotEmpty())
                         " (${bi.params.joinToString(", ") { it.first }})" else ""
-                    holder.newAnnotation(
-                        HighlightSeverity.ERROR,
-                        "$name() expects $expected argument${if (expected != 1) "s" else ""}$paramStr, got $argCount"
-                    ).range(element.textRange).create()
+                    holder.newAnnotation(HighlightSeverity.ERROR,
+                        "$name() expects $expected argument${if (expected != 1) "s" else ""}$pStr, got $argCount")
+                        .range(element.textRange).create()
                 }
             }
 
-            // ── User-defined function ─────────────────────────────────────
+            // ── User-defined top-level function ───────────────────────────
             name in symbols.functions -> {
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
                     .range(nameRange).textAttributes(SabakaColors.FUNC_CALL).create()
-
-                val expected = symbols.functions[name]!!.paramCount
-                if (argCount != expected) {
-                    holder.newAnnotation(
-                        HighlightSeverity.ERROR,
-                        "'$name' expects $expected argument${if (expected != 1) "s" else ""}, got $argCount"
-                    ).range(element.textRange).create()
+                val info = symbols.functions[name]!!
+                if (argCount != info.paramCount) {
+                    holder.newAnnotation(HighlightSeverity.ERROR,
+                        "'$name' expects ${info.paramCount} argument${if (info.paramCount != 1) "s" else ""}, got $argCount")
+                        .range(element.textRange).create()
                 }
             }
 
-            // ── Class / struct constructor ────────────────────────────────
+            // ── Class constructor ─────────────────────────────────────────
             name in symbols.classes -> {
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
                     .range(nameRange).textAttributes(SabakaColors.CLASS_NAME).create()
@@ -153,32 +159,168 @@ class SabakaAnnotator : Annotator {
                     .range(nameRange).textAttributes(SabakaColors.STRUCT_NAME).create()
             }
 
-            // ── Unknown — ERROR only if it really looks like a call, not a ─
-            // ── method call (those have a dot before them, handled by postfix)
+            // ── Unknown ───────────────────────────────────────────────────
             else -> {
-                // Only flag as error if parent is not a member access (obj.foo())
-                val parentType = element.node.treeParent?.elementType
-                if (parentType != SabakaElementTypes.MEMBER_ACCESS_EXPR &&
-                    parentType != SabakaElementTypes.CALL_EXPR) {
-                    holder.newAnnotation(
-                        HighlightSeverity.ERROR,
-                        "Unresolved function or constructor '$name'"
-                    ).range(nameRange).create()
-                }
+                holder.newAnnotation(HighlightSeverity.ERROR,
+                    "Unresolved function or constructor '$name'")
+                    .range(nameRange).create()
             }
         }
     }
 
+    // ── Member access: obj.field / obj.method() / super::method() ────────────
+
+    private fun annotateMemberAccess(
+        element: SabakaCompositeElement,
+        symbols: SymbolTable,
+        holder: AnnotationHolder
+    ) {
+        // MEMBER_ACCESS_EXPR has children: [object_expr] DOT/:: [member_name]
+        val children = element.node.getChildren(null)
+        val memberNameNode = children.lastOrNull {
+            it.elementType == SabakaTokenTypes.IDENTIFIER
+        } ?: return
+        val memberName = memberNameNode.text
+
+        // Determine object type — we only check when object is a plain variable
+        // (full type inference is out of scope, we just handle the most common patterns)
+        val objNode = children.firstOrNull {
+            it.elementType == SabakaElementTypes.VAR_EXPR ||
+            it.elementType == SabakaElementTypes.SUPER_EXPR
+        } ?: return
+
+        val isSuper = objNode.elementType == SabakaElementTypes.SUPER_EXPR
+        val currentClass = enclosingClassName(element)
+
+        if (isSuper) {
+            // super::method() — validate that base class has this method
+            if (currentClass == null) {
+                holder.newAnnotation(HighlightSeverity.ERROR,
+                    "'super' can only be used inside a class")
+                    .range(objNode.textRange).create()
+                return
+            }
+            val baseClass = symbols.classParents[currentClass]
+            if (baseClass == null) {
+                holder.newAnnotation(HighlightSeverity.ERROR,
+                    "Class '$currentClass' has no base class")
+                    .range(objNode.textRange).create()
+                return
+            }
+            // Check method exists on base class (including inherited)
+            val methods = symbols.allMethodsOf(baseClass)
+            if (memberName !in methods.map { it.name }) {
+                holder.newAnnotation(HighlightSeverity.ERROR,
+                    "'$baseClass' has no method '$memberName'")
+                    .range(memberNameNode.textRange).create()
+            }
+            return
+        }
+
+        // Regular obj.member — look up the variable type
+        val objName = objNode.psi.text
+        val objTypeName = resolveLocalType(objName, element, symbols) ?: return
+
+        // Check the member exists and is accessible
+        val allMembers = symbols.allMembersOf(objTypeName)
+        val member = allMembers.firstOrNull { it.name == memberName }
+
+        if (member == null) {
+            // Only flag if we positively know the type (not generic T etc.)
+            if (objTypeName in symbols.classes || objTypeName in symbols.structs) {
+                holder.newAnnotation(HighlightSeverity.ERROR,
+                    "'$objTypeName' has no member '$memberName'")
+                    .range(memberNameNode.textRange).create()
+            }
+            return
+        }
+
+        // Access modifier check (mirrors Compiler.cs CheckAccess exactly)
+        when (member.access) {
+            AccessLevel.PUBLIC -> { /* always OK */ }
+            AccessLevel.PRIVATE -> {
+                if (currentClass == null) {
+                    holder.newAnnotation(HighlightSeverity.ERROR,
+                        "Cannot access private ${member.kind} '$memberName' of '$objTypeName' from top-level")
+                        .range(memberNameNode.textRange).create()
+                } else if (currentClass != objTypeName) {
+                    holder.newAnnotation(HighlightSeverity.ERROR,
+                        "Cannot access private ${member.kind} '$memberName' of '$objTypeName' from '$currentClass'")
+                        .range(memberNameNode.textRange).create()
+                }
+            }
+            AccessLevel.PROTECTED -> {
+                if (currentClass == null) {
+                    holder.newAnnotation(HighlightSeverity.ERROR,
+                        "Cannot access protected ${member.kind} '$memberName' of '$objTypeName' from top-level")
+                        .range(memberNameNode.textRange).create()
+                } else if (!symbols.isDerivedFrom(currentClass, objTypeName)) {
+                    holder.newAnnotation(HighlightSeverity.ERROR,
+                        "Cannot access protected ${member.kind} '$memberName' of '$objTypeName' from '$currentClass'")
+                        .range(memberNameNode.textRange).create()
+                }
+            }
+        }
+
+        // Semantic highlight for method calls
+        if (member.kind == "method") {
+            holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                .range(memberNameNode.textRange).textAttributes(SabakaColors.FUNC_CALL).create()
+        }
+    }
+
+    // ── Resolve type of a local variable by name ──────────────────────────────
+    // Walks scopes upward looking for a VarDeclStmt or Param with matching name,
+    // then extracts the type token text (first child of the node).
+
+    private fun resolveLocalType(name: String, from: PsiElement, symbols: SymbolTable): String? {
+        // Check if it's a known class/struct name used directly (static/enum access)
+        if (name in symbols.classes) return name
+        if (name in symbols.structs) return name
+
+        var scope: PsiElement? = from.parent
+        while (scope != null) {
+            // Params
+            PsiTreeUtil.getChildrenOfType(scope, SabakaParam::class.java)
+                ?.firstOrNull { it.name == name }
+                ?.let { param ->
+                    // type is the first child node text
+                    return param.node.firstChildNode?.text
+                }
+            // Var decls in this scope
+            PsiTreeUtil.getChildrenOfType(scope, SabakaVarDeclStmt::class.java)
+                ?.firstOrNull { it.name == name }
+                ?.let { v ->
+                    return v.node.firstChildNode?.text
+                }
+            // Also search recursively inside BLOCK children for deeper vars
+            PsiTreeUtil.findChildrenOfType(scope, SabakaVarDeclStmt::class.java)
+                .firstOrNull { it.name == name }
+                ?.let { v ->
+                    return v.node.firstChildNode?.text
+                }
+            if (scope is SabakaFile) break
+            scope = scope.parent
+        }
+        return null
+    }
+
     // ── super context ─────────────────────────────────────────────────────────
 
-    private fun checkSuperContext(element: PsiElement, holder: AnnotationHolder) {
-        var p = element.parent
-        while (p != null) {
-            if (p is SabakaClassDecl) return
-            if (p is SabakaFile) break
-            p = p.parent
-        }
-        holder.newAnnotation(HighlightSeverity.ERROR, "'super' can only be used inside a class")
+    private fun checkSuperContext(
+        element: PsiElement,
+        symbols: SymbolTable,
+        holder: AnnotationHolder
+    ) {
+        val currentClass = enclosingClassName(element)
+        if (currentClass != null) return  // OK — inside a class
+
+        // Only report if NOT inside a member access (super::foo handled there)
+        val parentType = element.node.treeParent?.elementType
+        if (parentType == SabakaElementTypes.MEMBER_ACCESS_EXPR) return
+
+        holder.newAnnotation(HighlightSeverity.ERROR,
+            "'super' can only be used inside a class")
             .range(element.textRange).create()
     }
 
@@ -212,7 +354,8 @@ class SabakaAnnotator : Annotator {
                     .range(it.textRange).create()
             }; return
         }
-        if (symbols.classMethods[baseName]?.contains(name) != true) {
+        // Check base class (and its ancestors) has this method
+        if (!symbols.hasMethodInHierarchy(baseName, name)) {
             fn.nameIdentifier?.let {
                 holder.newAnnotation(HighlightSeverity.WARNING,
                     "Method '$name' is marked override but '$baseName' has no such method")
@@ -223,10 +366,15 @@ class SabakaAnnotator : Annotator {
 
     // ── Interface implementation ──────────────────────────────────────────────
 
-    private fun checkInterfaceImplementation(cls: SabakaClassDecl, symbols: SymbolTable, holder: AnnotationHolder) {
+    private fun checkInterfaceImplementation(
+        cls: SabakaClassDecl,
+        symbols: SymbolTable,
+        holder: AnnotationHolder
+    ) {
         val clsName = cls.name ?: return
         val ifaces = symbols.classInterfaces[clsName] ?: return
-        val ownMethods = symbols.classMethods[clsName] ?: emptySet()
+        // Collect all methods including inherited ones
+        val ownMethods = symbols.allMethodsOf(clsName).map { it.name }.toSet()
         for (iface in ifaces) {
             for (required in symbols.interfaceMethods[iface] ?: emptySet()) {
                 if (required !in ownMethods) {
@@ -241,6 +389,18 @@ class SabakaAnnotator : Annotator {
     }
 }
 
+// ── Access level ──────────────────────────────────────────────────────────────
+
+enum class AccessLevel { PUBLIC, PRIVATE, PROTECTED }
+
+data class MemberInfo(
+    val name: String,
+    val kind: String,        // "method" | "field"
+    val access: AccessLevel,
+    val paramCount: Int = 0, // for methods
+    val definingClass: String = ""
+)
+
 // ── Symbol table ──────────────────────────────────────────────────────────────
 
 data class FuncInfo(val paramCount: Int)
@@ -253,8 +413,9 @@ class SymbolTable private constructor(
     val enumMembers: Set<String>,
     val classParents: Map<String, String>,
     val classInterfaces: Map<String, List<String>>,
-    val classMethods: Map<String, Set<String>>,
-    val classFields: Map<String, Set<String>>,
+    // Direct (non-inherited) members per class
+    val directMembers: Map<String, List<MemberInfo>>,
+    val structFields: Map<String, List<MemberInfo>>,
     val interfaceMethods: Map<String, Set<String>>
 ) {
     companion object {
@@ -268,64 +429,166 @@ class SymbolTable private constructor(
             val enumMembers  = mutableSetOf<String>()
             val classParents = mutableMapOf<String, String>()
             val classIfaces  = mutableMapOf<String, MutableList<String>>()
-            val classMethods = mutableMapOf<String, MutableSet<String>>()
-            val classFields  = mutableMapOf<String, MutableSet<String>>()
+            val directMembers = mutableMapOf<String, MutableList<MemberInfo>>()
+            val structFields = mutableMapOf<String, MutableList<MemberInfo>>()
             val ifaceMethods = mutableMapOf<String, MutableSet<String>>()
 
+            // Top-level functions
             PsiTreeUtil.findChildrenOfType(file, SabakaFuncDecl::class.java)
                 .filter { it.parent is SabakaFile }
                 .forEach { fn ->
                     val n = fn.name ?: return@forEach
-                    val pc = PsiTreeUtil.findChildrenOfType(fn.getParamList(), SabakaParam::class.java).size
+                    val pc = PsiTreeUtil.findChildrenOfType(
+                        fn.getParamList(), SabakaParam::class.java).size
                     functions[n] = FuncInfo(pc)
                 }
 
+            // Classes
             PsiTreeUtil.findChildrenOfType(file, SabakaClassDecl::class.java).forEach { cls ->
-                val n = cls.name ?: return@forEach
-                classes.add(n)
+                val clsName = cls.name ?: return@forEach
+                classes.add(clsName)
+
+                // Parse base class / interfaces from tokens:  class Foo : Base, IFace
                 var node = cls.node.firstChildNode
                 var colonSeen = false; var firstAfterColon = true
                 while (node != null) {
-                    if (node.elementType == SabakaTokenTypes.COLON) { colonSeen = true; node = node.treeNext; continue }
+                    if (node.elementType == SabakaTokenTypes.COLON) {
+                        colonSeen = true; node = node.treeNext; continue
+                    }
                     if (colonSeen && node.elementType == SabakaTokenTypes.IDENTIFIER) {
-                        if (firstAfterColon) { classParents[n] = node.text; firstAfterColon = false }
-                        else classIfaces.getOrPut(n) { mutableListOf() }.add(node.text)
+                        if (firstAfterColon) { classParents[clsName] = node.text; firstAfterColon = false }
+                        else classIfaces.getOrPut(clsName) { mutableListOf() }.add(node.text)
                     }
                     if (node.elementType == SabakaElementTypes.CLASS_BODY) break
                     node = node.treeNext
                 }
+
+                val members = mutableListOf<MemberInfo>()
+
+                // Methods (SabakaFuncDecl used for methods inside class body)
                 val body = cls.getBody() ?: return@forEach
                 PsiTreeUtil.getChildrenOfType(body, SabakaFuncDecl::class.java)
-                    ?.mapNotNull { it.name }?.let { classMethods.getOrPut(n) { mutableSetOf() }.addAll(it) }
+                    ?.forEach { fn ->
+                        val n = fn.name ?: return@forEach
+                        val access = readAccessOf(fn.node)
+                        val pc = PsiTreeUtil.findChildrenOfType(
+                            fn.getParamList(), SabakaParam::class.java).size
+                        members.add(MemberInfo(n, "method", access, pc, clsName))
+                    }
                 PsiTreeUtil.getChildrenOfType(body, SabakaMethodDecl::class.java)
-                    ?.mapNotNull { it.name }?.let { classMethods.getOrPut(n) { mutableSetOf() }.addAll(it) }
+                    ?.forEach { m ->
+                        val n = m.name ?: return@forEach
+                        val access = readAccessOf(m.node)
+                        members.add(MemberInfo(n, "method", access, 0, clsName))
+                    }
+
+                // Fields
                 PsiTreeUtil.getChildrenOfType(body, SabakaFieldDecl::class.java)
-                    ?.mapNotNull { it.name }?.let { classFields.getOrPut(n) { mutableSetOf() }.addAll(it) }
+                    ?.forEach { f ->
+                        val n = f.name ?: return@forEach
+                        val access = readAccessOf(f.node)
+                        members.add(MemberInfo(n, "field", access, 0, clsName))
+                    }
+
+                directMembers[clsName] = members
             }
 
+            // Structs
             PsiTreeUtil.findChildrenOfType(file, SabakaStructDecl::class.java).forEach { st ->
                 val n = st.name ?: return@forEach; structs.add(n)
+                val fields = mutableListOf<MemberInfo>()
                 val body = st.getBody() ?: return@forEach
                 PsiTreeUtil.getChildrenOfType(body, SabakaFieldDecl::class.java)
-                    ?.mapNotNull { it.name }?.let { classFields.getOrPut(n) { mutableSetOf() }.addAll(it) }
+                    ?.forEach { f ->
+                        f.name?.let { fn ->
+                            fields.add(MemberInfo(fn, "field", AccessLevel.PUBLIC, 0, n))
+                        }
+                    }
+                structFields[n] = fields
             }
 
+            // Enums
             PsiTreeUtil.findChildrenOfType(file, SabakaEnumDecl::class.java).forEach { en ->
                 val n = en.name ?: return@forEach; enums.add(n)
                 PsiTreeUtil.findChildrenOfType(en.getBody() ?: return@forEach, SabakaEnumMember::class.java)
                     .mapNotNull { it.name }.let { enumMembers.addAll(it) }
             }
 
+            // Interfaces
             PsiTreeUtil.findChildrenOfType(file, SabakaInterfaceDecl::class.java).forEach { iface ->
                 val n = iface.name ?: return@forEach
-                PsiTreeUtil.findChildrenOfType(iface.getBody() ?: return@forEach, SabakaCompositeElement::class.java)
+                PsiTreeUtil.findChildrenOfType(
+                    iface.getBody() ?: return@forEach, SabakaCompositeElement::class.java)
                     .filter { it.node.elementType == SabakaElementTypes.INTERFACE_METHOD }
                     .mapNotNull { it.node.findChildByType(SabakaTokenTypes.IDENTIFIER)?.text }
                     .let { ifaceMethods.getOrPut(n) { mutableSetOf() }.addAll(it) }
             }
 
-            return SymbolTable(functions, classes, structs, enums, enumMembers,
-                classParents, classIfaces, classMethods, classFields, ifaceMethods)
+            return SymbolTable(
+                functions, classes, structs, enums, enumMembers,
+                classParents, classIfaces, directMembers, structFields, ifaceMethods
+            )
+        }
+
+        /** Read the access modifier from an ASTNode's children (first token if it's an access kw). */
+        private fun readAccessOf(node: com.intellij.lang.ASTNode): AccessLevel {
+            val first = node.firstChildNode?.elementType
+            return when (first) {
+                SabakaTokenTypes.KW_PRIVATE   -> AccessLevel.PRIVATE
+                SabakaTokenTypes.KW_PROTECTED -> AccessLevel.PROTECTED
+                else                          -> AccessLevel.PUBLIC
+            }
         }
     }
+
+    // ── Hierarchy helpers ─────────────────────────────────────────────────────
+
+    /** Returns true if child == parent or child inherits from parent (transitively). */
+    fun isDerivedFrom(child: String, parent: String): Boolean {
+        if (child == parent) return true
+        val base = classParents[child] ?: return false
+        return isDerivedFrom(base, parent)
+    }
+
+    /** All methods visible on className, including inherited ones (base class first). */
+    fun allMethodsOf(className: String): List<MemberInfo> {
+        val result = mutableListOf<MemberInfo>()
+        val seen = mutableSetOf<String>()
+        var current: String? = className
+        // Walk up inheritance chain: child methods shadow parent methods
+        val chain = mutableListOf<String>()
+        while (current != null) { chain.add(current); current = classParents[current] }
+        // Process from root down so child overrides parent in `seen`
+        for (cls in chain.reversed()) {
+            (directMembers[cls] ?: emptyList())
+                .filter { it.kind == "method" }
+                .forEach { m -> if (seen.add(m.name)) result.add(m) else {
+                    // replace with child's version
+                    val idx = result.indexOfFirst { it.name == m.name }
+                    if (idx >= 0) result[idx] = m
+                }}
+        }
+        return result
+    }
+
+    /** All fields + methods visible on className (including inherited). */
+    fun allMembersOf(className: String): List<MemberInfo> {
+        if (className in structs) return structFields[className] ?: emptyList()
+        val result = mutableListOf<MemberInfo>()
+        val seenNames = mutableSetOf<String>()
+        var current: String? = className
+        val chain = mutableListOf<String>()
+        while (current != null) { chain.add(current); current = classParents[current] }
+        for (cls in chain.reversed()) {
+            (directMembers[cls] ?: emptyList()).forEach { m ->
+                if (seenNames.add(m.name)) result.add(m)
+                else { val idx = result.indexOfFirst { it.name == m.name }; if (idx >= 0) result[idx] = m }
+            }
+        }
+        return result
+    }
+
+    /** True if className or any ancestor has a method with the given name. */
+    fun hasMethodInHierarchy(className: String, methodName: String): Boolean =
+        allMethodsOf(className).any { it.name == methodName }
 }
