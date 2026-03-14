@@ -19,6 +19,7 @@
         <lang.syntaxHighlighterFactory language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.highlighting.SabakaSyntaxHighlighterFactory"/>
         <colorSettingsPage implementation="com.sabakachabaka.sabakalang.highlighting.SabakaColorSettingsPage"/>
         <annotator language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.annotator.SabakaAnnotator"/>
+        <annotator language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.imports.SabakaImportAnnotator"/>
         <!--  ── Editing helpers ─────────────────────────────────────────  -->
         <lang.braceMatcher language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaBraceMatcher"/>
         <lang.commenter language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaCommenter"/>
@@ -30,6 +31,7 @@
         <lang.documentationProvider language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaDocumentationProvider"/>
         <!--  ── Completion ──────────────────────────────────────────────  -->
         <completion.contributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.completion.SabakaCompletionContributor"/>
+        <completion.contributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.imports.SabakaImportCompletionContributor"/>
         <!--  ── Formatter ───────────────────────────────────────────────  -->
         <lang.formatter language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.formatter.SabakaFormattingModelBuilder"/>
         <codeStyleSettingsProvider implementation="com.sabakachabaka.sabakalang.formatter.SabakaCodeStyleSettingsProvider"/>

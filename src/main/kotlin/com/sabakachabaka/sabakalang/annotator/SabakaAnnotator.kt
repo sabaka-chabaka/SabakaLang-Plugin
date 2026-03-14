@@ -159,6 +159,10 @@ class SabakaAnnotator : Annotator {
                     .range(nameRange).textAttributes(SabakaColors.STRUCT_NAME).create()
             }
 
+            // ── DLL module alias used as standalone name (e.g. `ui` in `ui.foo()`) ──
+            // This is handled by annotateMemberAccess; don't double-report here
+            name in symbols.dllModules -> { /* known DLL alias — no error */ }
+
             // ── Unknown ───────────────────────────────────────────────────
             else -> {
                 holder.newAnnotation(HighlightSeverity.ERROR,
@@ -231,6 +235,11 @@ class SabakaAnnotator : Annotator {
 
         // Regular obj.member — look up the variable type
         val objName = objNode.psi.text
+
+        // If the object name is a known DLL module alias (e.g. `ui` from `import "SabakaUI.dll" as ui;`)
+        // we can't introspect the DLL methods at IDE time — suppress all member errors silently
+        if (objName in symbols.dllModules) return
+
         val objTypeName = resolveLocalType(objName, element, symbols) ?: return
 
         // Check the member exists and is accessible
@@ -472,10 +481,47 @@ class SymbolTable private constructor(
     // Direct (non-inherited) members per class
     val directMembers: Map<String, List<MemberInfo>>,
     val structFields: Map<String, List<MemberInfo>>,
-    val interfaceMethods: Map<String, Set<String>>
+    val interfaceMethods: Map<String, Set<String>>,
+    // DLL module aliases: "ui" -> DllModuleInfo
+    val dllModules: Map<String, com.sabakachabaka.sabakalang.imports.DllModuleInfo> = emptyMap()
 ) {
     companion object {
-        fun of(file: SabakaFile): SymbolTable = build(file)
+        fun of(file: SabakaFile): SymbolTable {
+            val local = build(file)
+            // Merge imported symbols
+            val project = file.project
+            val imported = com.sabakachabaka.sabakalang.imports.SabakaImportResolver.resolve(file, project)
+            // Resolve DLL imports
+            val dllModules = com.sabakachabaka.sabakalang.imports.SabakaDllIndex
+                .resolveDllImports(file, project)
+                .associateBy { it.alias }
+
+            return SymbolTable(
+                functions        = local.functions + imported.functions,
+                classes          = local.classes + imported.classes,
+                structs          = local.structs + imported.structs,
+                enums            = local.enums + imported.enums,
+                enumMembers      = local.enumMembers + imported.enumMembers,
+                classParents     = local.classParents + imported.classParents,
+                classInterfaces  = (local.classInterfaces.keys + imported.classInterfaces.keys)
+                                       .associateWith { k ->
+                                           (local.classInterfaces[k] ?: emptyList()) +
+                                           (imported.classInterfaces[k] ?: emptyList())
+                                       },
+                directMembers    = (local.directMembers.keys + imported.directMembers.keys)
+                                       .associateWith { k ->
+                                           (local.directMembers[k] ?: emptyList()) +
+                                           (imported.directMembers[k] ?: emptyList())
+                                       },
+                structFields     = local.structFields + imported.structFields,
+                interfaceMethods = (local.interfaceMethods.keys + imported.interfaceMethods.keys)
+                                       .associateWith { k ->
+                                           (local.interfaceMethods[k] ?: emptySet()) +
+                                           (imported.interfaceMethods[k] ?: emptySet())
+                                       },
+                dllModules       = dllModules
+            )
+        }
 
         private fun build(file: SabakaFile): SymbolTable {
             val functions    = mutableMapOf<String, FuncInfo>()
