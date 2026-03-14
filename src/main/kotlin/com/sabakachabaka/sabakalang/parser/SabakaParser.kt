@@ -139,7 +139,7 @@ private class ParseContext(private val b: PsiBuilder) {
             }
         }
         consume(TT.SEMICOLON)
-        m.done(IMPORT_STMT)
+        m.done(ET.IMPORT_STMT)
     }
 
     // ── Function declaration ──────────────────────────────────────────────────
