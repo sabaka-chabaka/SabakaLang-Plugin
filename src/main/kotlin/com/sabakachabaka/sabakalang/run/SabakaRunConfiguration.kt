@@ -1,6 +1,8 @@
 package com.sabakachabaka.sabakalang.run
 
 import com.intellij.execution.*
+import com.intellij.execution.actions.ConfigurationContext
+import com.intellij.execution.actions.RunConfigurationProducer
 import com.intellij.execution.configurations.*
 import com.intellij.execution.filters.Filter
 import com.intellij.execution.filters.OpenFileHyperlinkInfo
@@ -186,18 +188,17 @@ class SabakaRunSettingsEditor(project: Project) : SettingsEditor<SabakaRunConfig
 // ── Run configuration producer (auto-detect from .sabaka file) ────────────────
 
 class SabakaRunConfigurationProducer :
-    LazyRunConfigurationProducer<SabakaRunConfiguration>() {
-
-    override fun getConfigurationFactory(): ConfigurationFactory =
+    RunConfigurationProducer<SabakaRunConfiguration>(
         ConfigurationTypeUtil.findConfigurationType(SabakaRunConfigurationType::class.java)
             .configurationFactories[0]
+    ) {
 
     override fun setupConfigurationFromContext(
         cfg: SabakaRunConfiguration,
         ctx: ConfigurationContext,
         source: com.intellij.openapi.util.Ref<PsiElement>
     ): Boolean {
-        val file = ctx.psiLocation?.containingFile as? SabakaFile ?: return false
+        val file = ctx.location?.psiElement?.containingFile as? SabakaFile ?: return false
         val vFile = file.virtualFile ?: return false
         cfg.scriptPath = vFile.path
         cfg.name = vFile.nameWithoutExtension
@@ -209,7 +210,7 @@ class SabakaRunConfigurationProducer :
         cfg: SabakaRunConfiguration,
         ctx: ConfigurationContext
     ): Boolean {
-        val file = ctx.psiLocation?.containingFile as? SabakaFile ?: return false
+        val file = ctx.location?.psiElement?.containingFile as? SabakaFile ?: return false
         return cfg.scriptPath == (file.virtualFile?.path ?: "")
     }
 }

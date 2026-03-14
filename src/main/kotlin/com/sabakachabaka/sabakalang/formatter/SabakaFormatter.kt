@@ -1,19 +1,18 @@
 package com.sabakachabaka.sabakalang.formatter
 
 import com.intellij.formatting.*
+import com.intellij.formatting.Indent
 import com.intellij.lang.ASTNode
-import com.intellij.openapi.util.TextRange
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiFile
+import com.intellij.openapi.options.Configurable
 import com.intellij.psi.TokenType
 import com.intellij.psi.codeStyle.*
 import com.intellij.psi.formatter.common.AbstractBlock
 import com.intellij.psi.tree.TokenSet
 import com.sabakachabaka.sabakalang.SabakaLanguage
 import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes
-import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.LBRACE
-import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.RBRACE
 import com.sabakachabaka.sabakalang.psi.SabakaElementTypes
+import javax.swing.JComponent
+import javax.swing.JPanel
 
 class SabakaFormattingModelBuilder : FormattingModelBuilder {
     override fun createModel(ctx: FormattingContext): FormattingModel {
@@ -25,19 +24,13 @@ class SabakaFormattingModelBuilder : FormattingModelBuilder {
 
     private fun createSpacingBuilder(settings: CodeStyleSettings): SpacingBuilder =
         SpacingBuilder(settings, SabakaLanguage)
-            // No space before ; or ,
             .before(SabakaTokenTypes.SEMICOLON).none()
             .before(SabakaTokenTypes.COMMA).none()
-            // 1 space after ,
             .after(SabakaTokenTypes.COMMA).spaces(1)
-            // Spaces around binary operators
             .around(SabakaTokenTypes.OPERATORS).spaces(1)
             .around(SabakaTokenTypes.EQ_SET).spaces(1)
-            // Space before opening brace
-            .before(LBRACE).spaces(1)
-            // No space before (
+            .before(SabakaTokenTypes.LBRACE).spaces(1)
             .before(SabakaTokenTypes.LPAREN).none()
-            // 1 space after control-flow keywords  if/while/for/foreach/switch
             .after(SabakaTokenTypes.KW_IF).spaces(1)
             .after(SabakaTokenTypes.KW_WHILE).spaces(1)
             .after(SabakaTokenTypes.KW_FOR).spaces(1)
@@ -46,10 +39,8 @@ class SabakaFormattingModelBuilder : FormattingModelBuilder {
             .after(SabakaTokenTypes.KW_RETURN).spaces(1)
             .after(SabakaTokenTypes.KW_IN).spaces(1)
             .after(SabakaTokenTypes.KW_NEW).spaces(1)
-            // No space around . and ::
             .around(SabakaTokenTypes.DOT).none()
             .around(SabakaTokenTypes.COLONCOLON).none()
-            // No space inside []
             .after(SabakaTokenTypes.LBRACKET).none()
             .before(SabakaTokenTypes.RBRACKET).none()
 }
@@ -84,8 +75,8 @@ class SabakaBlock(
     override fun getIndent(): Indent {
         val parent = node.treeParent?.elementType ?: return Indent.getNoneIndent()
         return if (parent in BODY_TYPES &&
-            node.elementType != LBRACE &&
-            node.elementType != RBRACE
+            node.elementType != SabakaTokenTypes.LBRACE &&
+            node.elementType != SabakaTokenTypes.RBRACE
         ) {
             Indent.getNormalIndent()
         } else {
@@ -93,75 +84,43 @@ class SabakaBlock(
         }
     }
 
-    override fun getChildIndent(): Indent? {
-        return if (node.elementType in BODY_TYPES) Indent.getNormalIndent()
-        else null
-    }
+    override fun getChildIndent(): Indent? =
+        if (node.elementType in BODY_TYPES) Indent.getNormalIndent() else null
 
     override fun getSpacing(child1: Block?, child2: Block): Spacing? =
         spacing.getSpacing(this, child1, child2)
 
     override fun isLeaf(): Boolean = node.firstChildNode == null
 
-    override fun getChildAttributes(newChildIndex: Int): ChildAttributes {
-        return if (node.elementType in BODY_TYPES)
+    override fun getChildAttributes(newChildIndex: Int): ChildAttributes =
+        if (node.elementType in BODY_TYPES)
             ChildAttributes(Indent.getNormalIndent(), null)
         else
             ChildAttributes(Indent.getNoneIndent(), null)
-    }
 }
-
-// ── Code style settings ───────────────────────────────────────────────────────
 
 class SabakaCodeStyleSettings(container: CodeStyleSettings) :
     CustomCodeStyleSettings("SabakaCodeStyleSettings", container)
 
 class SabakaCodeStyleSettingsProvider : CodeStyleSettingsProvider() {
-    override fun createCustomSettings(settings: CodeStyleSettings) =
-        SabakaCodeStyleSettings(settings)
+    override fun createCustomSettings(settings: CodeStyleSettings) = SabakaCodeStyleSettings(settings)
     override fun getConfigurableDisplayName() = "SabakaLang"
-    override fun createSettingsPage(settings: CodeStyleSettings, originalSettings: CodeStyleSettings) =
-        SabakaCodeStyleConfigurable(settings, originalSettings)
-}
 
-class SabakaCodeStyleConfigurable(
-    settings: CodeStyleSettings,
-    cloneSettings: CodeStyleSettings
-) : CodeStyleAbstractConfigurable(settings, cloneSettings, "SabakaLang") {
-    override fun createPanel(settings: CodeStyleSettings): CodeStyleAbstractPanel =
-        SabakaCodeStyleMainPanel(currentSettings, settings)
-}
-
-class SabakaCodeStyleMainPanel(currentSettings: CodeStyleSettings, settings: CodeStyleSettings) :
-    TabbedLanguageCodeStylePanel(SabakaLanguage, currentSettings, settings) {
-    override fun initTabs(settings: CodeStyleSettings) {
-        addIndentOptionsTab(settings)
-        addSpacesTab(settings)
+    override fun createSettingsPage(
+        settings: CodeStyleSettings,
+        originalSettings: CodeStyleSettings
+    ): Configurable = object : Configurable {
+        override fun getDisplayName() = "SabakaLang"
+        override fun createComponent(): JComponent = JPanel()
+        override fun isModified() = false
+        override fun apply() {}
     }
 }
 
 class SabakaLanguageCodeStyleSettingsProvider : LanguageCodeStyleSettingsProvider() {
     override fun getLanguage() = SabakaLanguage
+
     override fun getCodeSample(settingsType: SettingsType) = """
-class Animal {
-    private string name;
-    public int age;
-
-    public void Animal(string n, int a) {
-        name = n;
-        age = a;
-    }
-
-    public void speak() {
-        print("I am " + name);
-    }
-}
-
-int factorial(int n) {
-    if (n <= 1) return 1;
-    return n * factorial(n - 1);
-}
-
 void main() {
     int x = 10;
     int[] nums = [1, 2, 3];
@@ -173,11 +132,8 @@ void main() {
 
     override fun customizeSettings(consumer: CodeStyleSettingsCustomizable, settingsType: SettingsType) {
         when (settingsType) {
-            SettingsType.SPACING_SETTINGS -> {
-                consumer.showStandardOptions("SPACE_AFTER_COMMA", "SPACE_BEFORE_QUEST")
-            }
+            SettingsType.SPACING_SETTINGS -> consumer.showStandardOptions("SPACE_AFTER_COMMA")
             SettingsType.INDENT_SETTINGS  -> consumer.showStandardOptions("INDENT_SIZE", "TAB_SIZE", "USE_TAB_CHARACTER")
-            SettingsType.WRAPPING_AND_BRACES_SETTINGS -> consumer.showStandardOptions("BRACE_STYLE")
             else -> {}
         }
     }

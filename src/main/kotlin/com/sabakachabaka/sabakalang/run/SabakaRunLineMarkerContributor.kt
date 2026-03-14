@@ -27,7 +27,7 @@ class SabakaRunLineMarkerContributor : RunLineMarkerContributor() {
         if (func.parent !is SabakaFile) return null
 
         return Info(
-            AllIcons.RunConfigurations.TestState.Run,
+            AllIcons.Actions.Execute,
             { "Run ${element.containingFile.name}" },
             *ExecutorAction.getActions()
         )

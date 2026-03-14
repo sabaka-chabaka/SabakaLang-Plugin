@@ -3,7 +3,6 @@ package com.sabakachabaka.sabakalang.annotator
 import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
-import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.sabakachabaka.sabakalang.SabakaBuiltins

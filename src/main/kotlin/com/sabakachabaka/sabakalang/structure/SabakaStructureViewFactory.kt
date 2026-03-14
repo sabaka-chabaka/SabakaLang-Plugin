@@ -116,7 +116,7 @@ class SabakaEnumElement(en: SabakaEnumDecl) : PsiTreeElementBase<SabakaEnumDecl>
     override fun getChildrenBase(): Collection<StructureViewTreeElement> {
         val body = element?.getBody() ?: return emptyList()
         return PsiTreeUtil.findChildrenOfType(body, SabakaEnumMember::class.java)
-            .mapNotNull { m -> m.name?.let { SabakaLeafElement(it, AllIcons.Nodes.EnumConstant, m) } }
+            .mapNotNull { m -> m.name?.let { SabakaLeafElement(it, AllIcons.Nodes.Enum, m) } }
     }
 }
 

@@ -4,10 +4,8 @@ import com.intellij.lang.ASTNode
 import com.intellij.lang.PsiBuilder
 import com.intellij.lang.PsiParser
 import com.intellij.psi.tree.IElementType
-import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes
-import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.*
-import com.sabakachabaka.sabakalang.psi.SabakaElementTypes
-import com.sabakachabaka.sabakalang.psi.SabakaElementTypes.*
+import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes as TT
+import com.sabakachabaka.sabakalang.psi.SabakaElementTypes as ET
 
 /**
  * Recursive-descent parser for SabakaLang.
@@ -62,20 +60,20 @@ private class ParseContext(private val b: PsiBuilder) {
     }
 
     // A token starts a type: int / float / bool / string / void / Identifier
-    private fun isTypeStart() = tt() in ALL_TYPE_STARTS
+    private fun isTypeStart() = tt() in TT.ALL_TYPE_STARTS
 
-    private fun isAccessModifier() = tt() in ACCESS_MODIFIERS
+    private fun isAccessModifier() = tt() in TT.ACCESS_MODIFIERS
 
     // ── File ──────────────────────────────────────────────────────────────────
 
     fun parseFile() {
         while (!eof()) {
             when {
-                at(KW_IMPORT)    -> parseImport()
-                at(KW_CLASS)     -> parseClass()
-                at(KW_STRUCT)    -> parseStruct()
-                at(KW_ENUM)      -> parseEnum()
-                at(KW_INTERFACE) -> parseInterface()
+                at(TT.KW_IMPORT)    -> parseImport()
+                at(TT.KW_CLASS)     -> parseClass()
+                at(TT.KW_STRUCT)    -> parseStruct()
+                at(TT.KW_ENUM)      -> parseEnum()
+                at(TT.KW_INTERFACE) -> parseInterface()
                 // access modifier before class/struct/interface
                 isAccessModifier() && peekAfterModifierIsDecl() -> parseAccessModifiedDecl()
                 // Function or top-level statement: both start with a type token
@@ -89,7 +87,7 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun peekAfterModifierIsDecl(): Boolean {
         val saved = mark()
         advance() // skip access modifier
-        val result = at(KW_CLASS) || at(KW_STRUCT) || at(KW_ENUM) || at(KW_INTERFACE)
+        val result = at(TT.KW_CLASS) || at(TT.KW_STRUCT) || at(TT.KW_ENUM) || at(TT.KW_INTERFACE)
         saved.rollbackTo()
         return result
     }
@@ -97,10 +95,10 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseAccessModifiedDecl() {
         advance() // consume access modifier
         when {
-            at(KW_CLASS)     -> parseClass()
-            at(KW_STRUCT)    -> parseStruct()
-            at(KW_ENUM)      -> parseEnum()
-            at(KW_INTERFACE) -> parseInterface()
+            at(TT.KW_CLASS)     -> parseClass()
+            at(TT.KW_STRUCT)    -> parseStruct()
+            at(TT.KW_ENUM)      -> parseEnum()
+            at(TT.KW_INTERFACE) -> parseInterface()
             else             -> b.error("Expected class/struct/enum/interface after access modifier")
         }
     }
@@ -121,26 +119,26 @@ private class ParseContext(private val b: PsiBuilder) {
 
     private fun parseImport() {
         val m = mark()
-        expect(KW_IMPORT)
+        expect(TT.KW_IMPORT)
         when {
-            at(LBRACE) -> {
+            at(TT.LBRACE) -> {
                 advance() // {
-                while (!eof() && !at(RBRACE)) {
-                    if (at(IDENTIFIER)) advance()
-                    consume(COMMA)
+                while (!eof() && !at(TT.RBRACE)) {
+                    if (at(TT.IDENTIFIER)) advance()
+                    consume(TT.COMMA)
                 }
-                expect(RBRACE)
+                expect(TT.RBRACE)
                 // optional  from "path"
-                if (at(IDENTIFIER) && text() == "from") advance()
-                if (at(STRING_LITERAL)) advance()
+                if (at(TT.IDENTIFIER) && text() == "from") advance()
+                if (at(TT.STRING_LITERAL)) advance()
             }
-            at(STRING_LITERAL) -> advance()
-            at(IDENTIFIER) -> {
+            at(TT.STRING_LITERAL) -> advance()
+            at(TT.IDENTIFIER) -> {
                 advance()
-                if (at(EQ)) { advance(); if (at(STRING_LITERAL)) advance() }
+                if (at(TT.EQ)) { advance(); if (at(TT.STRING_LITERAL)) advance() }
             }
         }
-        consume(SEMICOLON)
+        consume(TT.SEMICOLON)
         m.done(IMPORT_STMT)
     }
 
@@ -155,32 +153,32 @@ private class ParseContext(private val b: PsiBuilder) {
         // optional access modifier
         if (isAccessModifier()) advance()
         // optional override
-        consume(KW_OVERRIDE)
+        consume(TT.KW_OVERRIDE)
         // return type (may be an array type or generic, e.g. T[])
         parseTypeRef()
         // function name
-        expect(IDENTIFIER)
+        expect(TT.IDENTIFIER)
         // optional generic type params: <T>  <T, U>
         parseOptionalTypeParams()
         // parameters
         parseParamList()
         // body
         parseBlock()
-        m.done(if (inClass) METHOD_DECL else FUNC_DECL)
+        m.done(if (inClass) ET.METHOD_DECL else ET.FUNC_DECL)
     }
 
     private fun parseParamList() {
         val m = mark()
-        expect(LPAREN)
-        while (!eof() && !at(RPAREN)) {
+        expect(TT.LPAREN)
+        while (!eof() && !at(TT.RPAREN)) {
             val pm = mark()
             parseTypeRef()         // param type  (e.g. int, T, string[])
-            expect(IDENTIFIER)     // param name
-            pm.done(PARAM)
-            if (!consume(COMMA)) break
+            expect(TT.IDENTIFIER)     // param name
+            pm.done(ET.PARAM)
+            if (!consume(TT.COMMA)) break
         }
-        expect(RPAREN)
-        m.done(PARAM_LIST)
+        expect(TT.RPAREN)
+        m.done(ET.PARAM_LIST)
     }
 
     // ── Class ─────────────────────────────────────────────────────────────────
@@ -188,23 +186,23 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseClass() {
         val m = mark()
         if (isAccessModifier()) advance()
-        expect(KW_CLASS)
-        expect(IDENTIFIER)
+        expect(TT.KW_CLASS)
+        expect(TT.IDENTIFIER)
         parseOptionalTypeParams()
         // optional : BaseClass, Interface1, Interface2
-        if (at(COLON)) {
+        if (at(TT.COLON)) {
             advance()
-            expect(IDENTIFIER)
-            while (consume(COMMA)) expect(IDENTIFIER)
+            expect(TT.IDENTIFIER)
+            while (consume(TT.COMMA)) expect(TT.IDENTIFIER)
         }
         val body = mark()
-        expect(LBRACE)
-        while (!eof() && !at(RBRACE)) {
+        expect(TT.LBRACE)
+        while (!eof() && !at(TT.RBRACE)) {
             parseClassMember()
         }
-        expect(RBRACE)
-        body.done(CLASS_BODY)
-        m.done(CLASS_DECL)
+        expect(TT.RBRACE)
+        body.done(ET.CLASS_BODY)
+        m.done(ET.CLASS_DECL)
     }
 
     private fun parseClassMember() {
@@ -218,13 +216,13 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseFieldDecl() {
         val m = mark()
         parseTypeRef()
-        expect(IDENTIFIER)
-        if (at(EQ)) {
+        expect(TT.IDENTIFIER)
+        if (at(TT.EQ)) {
             advance()
             parseExpr()
         }
-        consume(SEMICOLON)
-        m.done(FIELD_DECL)
+        consume(TT.SEMICOLON)
+        m.done(ET.FIELD_DECL)
     }
 
     // ── Struct ────────────────────────────────────────────────────────────────
@@ -232,24 +230,24 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseStruct() {
         val m = mark()
         if (isAccessModifier()) advance()
-        expect(KW_STRUCT)
-        expect(IDENTIFIER)
+        expect(TT.KW_STRUCT)
+        expect(TT.IDENTIFIER)
         val body = mark()
-        expect(LBRACE)
-        while (!eof() && !at(RBRACE)) {
+        expect(TT.LBRACE)
+        while (!eof() && !at(TT.RBRACE)) {
             if (isTypeStart()) {
                 val fm = mark()
                 parseTypeRef()
-                expect(IDENTIFIER)
-                consume(SEMICOLON)
-                fm.done(FIELD_DECL)
+                expect(TT.IDENTIFIER)
+                consume(TT.SEMICOLON)
+                fm.done(ET.FIELD_DECL)
             } else {
                 b.error("Expected field"); advance()
             }
         }
-        expect(RBRACE)
-        body.done(STRUCT_BODY)
-        m.done(STRUCT_DECL)
+        expect(TT.RBRACE)
+        body.done(ET.STRUCT_BODY)
+        m.done(ET.STRUCT_DECL)
     }
 
     // ── Enum ──────────────────────────────────────────────────────────────────
@@ -257,19 +255,19 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseEnum() {
         val m = mark()
         if (isAccessModifier()) advance()
-        expect(KW_ENUM)
-        expect(IDENTIFIER)
+        expect(TT.KW_ENUM)
+        expect(TT.IDENTIFIER)
         val body = mark()
-        expect(LBRACE)
-        while (!eof() && !at(RBRACE)) {
+        expect(TT.LBRACE)
+        while (!eof() && !at(TT.RBRACE)) {
             val em = mark()
-            expect(IDENTIFIER)
-            consume(COMMA)
-            em.done(ENUM_MEMBER)
+            expect(TT.IDENTIFIER)
+            consume(TT.COMMA)
+            em.done(ET.ENUM_MEMBER)
         }
-        expect(RBRACE)
-        body.done(ENUM_BODY)
-        m.done(ENUM_DECL)
+        expect(TT.RBRACE)
+        body.done(ET.ENUM_BODY)
+        m.done(ET.ENUM_DECL)
     }
 
     // ── Interface ─────────────────────────────────────────────────────────────
@@ -278,39 +276,39 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseInterface() {
         val m = mark()
         if (isAccessModifier()) advance()
-        expect(KW_INTERFACE)
-        expect(IDENTIFIER)
+        expect(TT.KW_INTERFACE)
+        expect(TT.IDENTIFIER)
         parseOptionalTypeParams()
         // optional : Parent1, Parent2
-        if (at(COLON)) {
+        if (at(TT.COLON)) {
             advance()
-            expect(IDENTIFIER)
-            while (consume(COMMA)) expect(IDENTIFIER)
+            expect(TT.IDENTIFIER)
+            while (consume(TT.COMMA)) expect(TT.IDENTIFIER)
         }
         val body = mark()
-        expect(LBRACE)
-        while (!eof() && !at(RBRACE)) {
+        expect(TT.LBRACE)
+        while (!eof() && !at(TT.RBRACE)) {
             val mm = mark()
             if (isAccessModifier()) advance()
             parseTypeRef()         // return type
-            expect(IDENTIFIER)     // method name
+            expect(TT.IDENTIFIER)     // method name
             parseParamList()
-            consume(SEMICOLON)
-            mm.done(INTERFACE_METHOD)
+            consume(TT.SEMICOLON)
+            mm.done(ET.INTERFACE_METHOD)
         }
-        expect(RBRACE)
-        body.done(INTERFACE_BODY)
-        m.done(INTERFACE_DECL)
+        expect(TT.RBRACE)
+        body.done(ET.INTERFACE_BODY)
+        m.done(ET.INTERFACE_DECL)
     }
 
     // ── Block ─────────────────────────────────────────────────────────────────
 
     private fun parseBlock() {
         val m = mark()
-        expect(LBRACE)
-        while (!eof() && !at(RBRACE)) parseStatement()
-        expect(RBRACE)
-        m.done(BLOCK)
+        expect(TT.LBRACE)
+        while (!eof() && !at(TT.RBRACE)) parseStatement()
+        expect(TT.RBRACE)
+        m.done(ET.BLOCK)
     }
 
     // ── Statements ────────────────────────────────────────────────────────────
@@ -318,13 +316,13 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseStatement() {
         when {
             isTypeStart() && isVarDecl() -> parseVarDeclStmt()
-            at(KW_RETURN)   -> parseReturnStmt()
-            at(KW_IF)       -> parseIfStmt()
-            at(KW_WHILE)    -> parseWhileStmt()
-            at(KW_FOR)      -> parseForStmt()
-            at(KW_FOREACH)  -> parseForeachStmt()
-            at(KW_SWITCH)   -> parseSwitchStmt()
-            at(LBRACE)      -> parseBlock()
+            at(TT.KW_RETURN)   -> parseReturnStmt()
+            at(TT.KW_IF)       -> parseIfStmt()
+            at(TT.KW_WHILE)    -> parseWhileStmt()
+            at(TT.KW_FOR)      -> parseForStmt()
+            at(TT.KW_FOREACH)  -> parseForeachStmt()
+            at(TT.KW_SWITCH)   -> parseSwitchStmt()
+            at(TT.LBRACE)      -> parseBlock()
             else            -> parseExprStmt()
         }
     }
@@ -332,101 +330,101 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseVarDeclStmt() {
         val m = mark()
         parseTypeRef()
-        expect(IDENTIFIER)
-        if (at(EQ)) { advance(); parseExpr() }
-        consume(SEMICOLON)
-        m.done(VAR_DECL_STMT)
+        expect(TT.IDENTIFIER)
+        if (at(TT.EQ)) { advance(); parseExpr() }
+        consume(TT.SEMICOLON)
+        m.done(ET.VAR_DECL_STMT)
     }
 
     private fun parseReturnStmt() {
         val m = mark()
-        expect(KW_RETURN)
-        if (!at(SEMICOLON) && !at(RBRACE) && !eof()) parseExpr()
-        consume(SEMICOLON)
-        m.done(RETURN_STMT)
+        expect(TT.KW_RETURN)
+        if (!at(TT.SEMICOLON) && !at(TT.RBRACE) && !eof()) parseExpr()
+        consume(TT.SEMICOLON)
+        m.done(ET.RETURN_STMT)
     }
 
     private fun parseIfStmt() {
         val m = mark()
-        expect(KW_IF)
-        expect(LPAREN); parseExpr(); expect(RPAREN)
+        expect(TT.KW_IF)
+        expect(TT.LPAREN); parseExpr(); expect(TT.RPAREN)
         parseStatement()
-        if (at(KW_ELSE)) { advance(); parseStatement() }
-        m.done(IF_STMT)
+        if (at(TT.KW_ELSE)) { advance(); parseStatement() }
+        m.done(ET.IF_STMT)
     }
 
     private fun parseWhileStmt() {
         val m = mark()
-        expect(KW_WHILE)
-        expect(LPAREN); parseExpr(); expect(RPAREN)
+        expect(TT.KW_WHILE)
+        expect(TT.LPAREN); parseExpr(); expect(TT.RPAREN)
         parseStatement()
-        m.done(WHILE_STMT)
+        m.done(ET.WHILE_STMT)
     }
 
     private fun parseForStmt() {
         val m = mark()
-        expect(KW_FOR)
-        expect(LPAREN)
+        expect(TT.KW_FOR)
+        expect(TT.LPAREN)
         // init
-        if (!at(SEMICOLON)) {
+        if (!at(TT.SEMICOLON)) {
             if (isTypeStart() && isVarDecl()) parseVarDeclStmt()
             else parseExprStmt()
         } else advance()
         // condition
-        if (!at(SEMICOLON)) parseExpr()
-        consume(SEMICOLON)
+        if (!at(TT.SEMICOLON)) parseExpr()
+        consume(TT.SEMICOLON)
         // increment
-        if (!at(RPAREN)) parseExpr()
-        expect(RPAREN)
+        if (!at(TT.RPAREN)) parseExpr()
+        expect(TT.RPAREN)
         parseStatement()
-        m.done(FOR_STMT)
+        m.done(ET.FOR_STMT)
     }
 
     private fun parseForeachStmt() {
         val m = mark()
-        expect(KW_FOREACH)
-        expect(LPAREN)
+        expect(TT.KW_FOREACH)
+        expect(TT.LPAREN)
         parseTypeRef()
-        expect(IDENTIFIER)
-        expect(KW_IN)
+        expect(TT.IDENTIFIER)
+        expect(TT.KW_IN)
         parseExpr()
-        expect(RPAREN)
+        expect(TT.RPAREN)
         parseStatement()
-        m.done(FOREACH_STMT)
+        m.done(ET.FOREACH_STMT)
     }
 
     private fun parseSwitchStmt() {
         val m = mark()
-        expect(KW_SWITCH)
-        expect(LPAREN); parseExpr(); expect(RPAREN)
-        expect(LBRACE)
-        while (!eof() && !at(RBRACE)) {
+        expect(TT.KW_SWITCH)
+        expect(TT.LPAREN); parseExpr(); expect(TT.RPAREN)
+        expect(TT.LBRACE)
+        while (!eof() && !at(TT.RBRACE)) {
             val cm = mark()
             when {
-                at(KW_CASE) -> {
-                    advance(); parseExpr(); expect(COLON)
-                    while (!eof() && !at(KW_CASE) && !at(KW_DEFAULT) && !at(RBRACE))
+                at(TT.KW_CASE) -> {
+                    advance(); parseExpr(); expect(TT.COLON)
+                    while (!eof() && !at(TT.KW_CASE) && !at(TT.KW_DEFAULT) && !at(TT.RBRACE))
                         parseStatement()
-                    cm.done(CASE_CLAUSE)
+                    cm.done(ET.CASE_CLAUSE)
                 }
-                at(KW_DEFAULT) -> {
-                    advance(); expect(COLON)
-                    while (!eof() && !at(KW_CASE) && !at(RBRACE))
+                at(TT.KW_DEFAULT) -> {
+                    advance(); expect(TT.COLON)
+                    while (!eof() && !at(TT.KW_CASE) && !at(TT.RBRACE))
                         parseStatement()
-                    cm.done(CASE_CLAUSE)
+                    cm.done(ET.CASE_CLAUSE)
                 }
                 else -> { b.error("Expected 'case' or 'default'"); advance(); cm.drop() }
             }
         }
-        expect(RBRACE)
-        m.done(SWITCH_STMT)
+        expect(TT.RBRACE)
+        m.done(ET.SWITCH_STMT)
     }
 
     private fun parseExprStmt() {
         val m = mark()
         parseExpr()
-        consume(SEMICOLON)
-        m.done(EXPR_STMT)
+        consume(TT.SEMICOLON)
+        m.done(ET.EXPR_STMT)
     }
 
     // ── Expressions (Pratt-style) ─────────────────────────────────────────────
@@ -436,18 +434,18 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseAssign() {
         val m = mark()
         parseOr()
-        if (at(EQ)) {
+        if (at(TT.EQ)) {
             advance(); parseAssign()
-            m.done(ASSIGN_STMT)
+            m.done(ET.ASSIGN_STMT)
         } else m.drop()
     }
 
-    private fun parseOr()        = parseBinary({ parseAnd() },       OROR)
-    private fun parseAnd()       = parseBinary({ parseEquality() },  ANDAND)
-    private fun parseEquality()  = parseBinary({ parseRelational() }, EQEQ, NEQ)
-    private fun parseRelational()= parseBinary({ parseAddSub() },    LT, GT, LTE, GTE)
-    private fun parseAddSub()    = parseBinary({ parseMulDiv() },     PLUS, MINUS)
-    private fun parseMulDiv()    = parseBinary({ parseUnary() },      STAR, SLASH, PERCENT)
+    private fun parseOr()        = parseBinary({ parseAnd() },       TT.OROR)
+    private fun parseAnd()       = parseBinary({ parseEquality() },  TT.ANDAND)
+    private fun parseEquality()  = parseBinary({ parseRelational() }, TT.EQEQ, TT.NEQ)
+    private fun parseRelational()= parseBinary({ parseAddSub() },    TT.LT, TT.GT, TT.LTE, TT.GTE)
+    private fun parseAddSub()    = parseBinary({ parseMulDiv() },     TT.PLUS, TT.MINUS)
+    private fun parseMulDiv()    = parseBinary({ parseUnary() },      TT.STAR, TT.SLASH, TT.PERCENT)
 
     private fun parseBinary(sub: () -> Unit, vararg ops: IElementType) {
         sub()
@@ -455,8 +453,8 @@ private class ParseContext(private val b: PsiBuilder) {
     }
 
     private fun parseUnary() {
-        if (at(MINUS) || at(BANG)) {
-            val m = mark(); advance(); parseUnary(); m.done(UNARY_EXPR)
+        if (at(TT.MINUS) || at(TT.BANG)) {
+            val m = mark(); advance(); parseUnary(); m.done(ET.UNARY_EXPR)
         } else {
             parsePostfix()
         }
@@ -466,17 +464,17 @@ private class ParseContext(private val b: PsiBuilder) {
         parsePrimary()
         while (true) {
             when {
-                at(DOT) -> {
-                    advance(); expect(IDENTIFIER)
-                    if (at(LPAREN)) parseArgList()
+                at(TT.DOT) -> {
+                    advance(); expect(TT.IDENTIFIER)
+                    if (at(TT.LPAREN)) parseArgList()
                 }
-                at(COLONCOLON) -> {
+                at(TT.COLONCOLON) -> {
                     advance()
-                    if (at(IDENTIFIER)) advance()
-                    if (at(LPAREN)) parseArgList()
+                    if (at(TT.IDENTIFIER)) advance()
+                    if (at(TT.LPAREN)) parseArgList()
                 }
-                at(LBRACKET) -> {
-                    advance(); parseExpr(); expect(RBRACKET)
+                at(TT.LBRACKET) -> {
+                    advance(); parseExpr(); expect(TT.RBRACKET)
                 }
                 else -> break
             }
@@ -486,34 +484,34 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parsePrimary() {
         val m = mark()
         when {
-            at(INT_LITERAL) || at(FLOAT_LITERAL) || at(STRING_LITERAL) || at(BOOL_LITERAL) -> {
-                advance(); m.done(LITERAL_EXPR)
+            at(TT.INT_LITERAL) || at(TT.FLOAT_LITERAL) || at(TT.STRING_LITERAL) || at(TT.BOOL_LITERAL) -> {
+                advance(); m.done(ET.LITERAL_EXPR)
             }
-            at(KW_NEW) -> {
+            at(TT.KW_NEW) -> {
                 advance()
-                expect(IDENTIFIER)
+                expect(TT.IDENTIFIER)
                 parseOptionalTypeParams()
                 when {
-                    at(LBRACKET) -> { advance(); parseExpr(); expect(RBRACKET) }
-                    at(LPAREN)   -> parseArgList()
+                    at(TT.LBRACKET) -> { advance(); parseExpr(); expect(TT.RBRACKET) }
+                    at(TT.LPAREN)   -> parseArgList()
                 }
-                m.done(NEW_EXPR)
+                m.done(ET.NEW_EXPR)
             }
-            at(KW_SUPER) -> { advance(); m.done(SUPER_EXPR) }
-            at(LBRACKET) -> {
+            at(TT.KW_SUPER) -> { advance(); m.done(ET.SUPER_EXPR) }
+            at(TT.LBRACKET) -> {
                 advance()
-                while (!eof() && !at(RBRACKET)) {
-                    parseExpr(); if (!consume(COMMA)) break
+                while (!eof() && !at(TT.RBRACKET)) {
+                    parseExpr(); if (!consume(TT.COMMA)) break
                 }
-                expect(RBRACKET)
-                m.done(ARRAY_LITERAL)
+                expect(TT.RBRACKET)
+                m.done(ET.ARRAY_LITERAL)
             }
-            at(IDENTIFIER) -> {
+            at(TT.IDENTIFIER) -> {
                 advance()
-                if (at(LPAREN)) { parseArgList(); m.done(CALL_EXPR) }
-                else m.done(VAR_EXPR)
+                if (at(TT.LPAREN)) { parseArgList(); m.done(ET.CALL_EXPR) }
+                else m.done(ET.VAR_EXPR)
             }
-            at(LPAREN) -> { advance(); parseExpr(); expect(RPAREN); m.drop() }
+            at(TT.LPAREN) -> { advance(); parseExpr(); expect(TT.RPAREN); m.drop() }
             else -> {
                 if (!eof()) { b.error("Expected expression, got '${text()}'"); advance() }
                 m.drop()
@@ -523,12 +521,12 @@ private class ParseContext(private val b: PsiBuilder) {
 
     private fun parseArgList() {
         val m = mark()
-        expect(LPAREN)
-        while (!eof() && !at(RPAREN)) {
-            parseExpr(); if (!consume(COMMA)) break
+        expect(TT.LPAREN)
+        while (!eof() && !at(TT.RPAREN)) {
+            parseExpr(); if (!consume(TT.COMMA)) break
         }
-        expect(RPAREN)
-        m.done(ARG_LIST)
+        expect(TT.RPAREN)
+        m.done(ET.ARG_LIST)
     }
 
     // ── Type references ───────────────────────────────────────────────────────
@@ -538,45 +536,45 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseTypeRef() {
         val m = mark()
         when {
-            tt() in TYPE_KEYWORDS -> advance()
-            at(IDENTIFIER)        -> {
+            tt() in TT.TYPE_KEYWORDS -> advance()
+            at(TT.IDENTIFIER)        -> {
                 advance()
                 // Generic: Box<int>  or  T  alone
-                if (at(LT)) parseOptionalTypeParams()
+                if (at(TT.LT)) parseOptionalTypeParams()
             }
             else -> b.error("Expected type, got '${text()}'")
         }
         // Array suffix: []
-        while (at(LBRACKET) && peekIsRBracket()) {
-            advance(); expect(RBRACKET)
+        while (at(TT.LBRACKET) && peekIsRBracket()) {
+            advance(); expect(TT.RBRACKET)
         }
-        m.done(TYPE_REF)
+        m.done(ET.TYPE_REF)
     }
 
     private fun peekIsRBracket(): Boolean {
         val s = mark()
         advance() // [
-        val r = at(RBRACKET) || at(RBRACKET) // next is ] → true
+        val r = at(TT.RBRACKET) || at(TT.RBRACKET) // next is ] → true
         s.rollbackTo()
         // re-check after rollback
         val s2 = mark()
         advance()
-        val result = at(RBRACKET)
+        val result = at(TT.RBRACKET)
         s2.rollbackTo()
         return result
     }
 
     /** Parses optional <T>, <T, U> etc. */
     private fun parseOptionalTypeParams() {
-        if (!at(LT)) return
+        if (!at(TT.LT)) return
         val saved = mark()
         advance() // <
         var depth = 1
         while (!eof() && depth > 0) {
             when {
-                at(LT)        -> { depth++; advance() }
-                at(GT)        -> { depth--; advance() }
-                at(SEMICOLON) -> break
+                at(TT.LT)        -> { depth++; advance() }
+                at(TT.GT)        -> { depth--; advance() }
+                at(TT.SEMICOLON) -> break
                 else          -> advance()
             }
         }
@@ -589,7 +587,7 @@ private class ParseContext(private val b: PsiBuilder) {
     /**
      * Determines if the current position starts a function declaration.
      * Logic mirrors Parser.cs IsFunctionDeclaration():
-     *   [access] [override] TypeName [<>] [][] IDENTIFIER LPAREN
+     *   [access] [override] TypeName [<>] [][] TT.IDENTIFIER TT.LPAREN
      */
     fun isFunctionDeclaration(): Boolean {
         val saved = mark()
@@ -597,47 +595,47 @@ private class ParseContext(private val b: PsiBuilder) {
             // optional access modifier
             if (isAccessModifier()) advance()
             // optional override
-            if (at(KW_OVERRIDE)) advance()
+            if (at(TT.KW_OVERRIDE)) advance()
             // return type must be a type keyword or identifier
             if (!isTypeStart()) return false
             advance()
             // skip generic type args on return type
-            if (at(LT)) {
+            if (at(TT.LT)) {
                 advance()
                 var depth = 1
                 while (!eof() && depth > 0) {
                     when {
-                        at(LT)        -> { depth++; advance() }
-                        at(GT)        -> { depth--; advance() }
-                        at(SEMICOLON) -> return false
+                        at(TT.LT)        -> { depth++; advance() }
+                        at(TT.GT)        -> { depth--; advance() }
+                        at(TT.SEMICOLON) -> return false
                         else          -> advance()
                     }
                 }
                 if (depth != 0) return false
             }
             // skip array brackets on return type: int[]
-            while (at(LBRACKET)) {
+            while (at(TT.LBRACKET)) {
                 advance()
-                if (!at(RBRACKET)) return false
+                if (!at(TT.RBRACKET)) return false
                 advance()
             }
             // must be an identifier (function name)
-            if (!at(IDENTIFIER)) return false
+            if (!at(TT.IDENTIFIER)) return false
             advance()
             // optional generic type params on name: swap<T>
-            if (at(LT)) {
+            if (at(TT.LT)) {
                 advance()
                 var depth = 1
                 while (!eof() && depth > 0) {
                     when {
-                        at(LT)  -> { depth++; advance() }
-                        at(GT)  -> { depth--; advance() }
+                        at(TT.LT)  -> { depth++; advance() }
+                        at(TT.GT)  -> { depth--; advance() }
                         else    -> advance()
                     }
                 }
             }
-            // must be followed by LPAREN
-            return at(LPAREN)
+            // must be followed by TT.LPAREN
+            return at(TT.LPAREN)
         } finally {
             saved.rollbackTo()
         }
@@ -645,7 +643,7 @@ private class ParseContext(private val b: PsiBuilder) {
 
     /**
      * Determines if current position is a variable declaration:
-     *   TypeName [<>] [][] IDENTIFIER (= | ; | ,)
+     *   TypeName [<>] [][] TT.IDENTIFIER (= | ; | ,)
      */
     private fun isVarDecl(): Boolean {
         val saved = mark()
@@ -653,25 +651,25 @@ private class ParseContext(private val b: PsiBuilder) {
             if (!isTypeStart()) return false
             advance()
             // skip generic
-            if (at(LT)) {
+            if (at(TT.LT)) {
                 advance()
                 var depth = 1
                 while (!eof() && depth > 0) {
                     when {
-                        at(LT)        -> { depth++; advance() }
-                        at(GT)        -> { depth--; advance() }
-                        at(SEMICOLON) -> return false
+                        at(TT.LT)        -> { depth++; advance() }
+                        at(TT.GT)        -> { depth--; advance() }
+                        at(TT.SEMICOLON) -> return false
                         else          -> advance()
                     }
                 }
             }
             // skip array brackets
-            while (at(LBRACKET)) {
+            while (at(TT.LBRACKET)) {
                 advance()
-                if (!at(RBRACKET)) return false
+                if (!at(TT.RBRACKET)) return false
                 advance()
             }
-            return at(IDENTIFIER)
+            return at(TT.IDENTIFIER)
         } finally {
             saved.rollbackTo()
         }

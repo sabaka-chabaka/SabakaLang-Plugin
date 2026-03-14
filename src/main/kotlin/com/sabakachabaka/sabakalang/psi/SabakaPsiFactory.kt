@@ -4,6 +4,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFileFactory
 import com.sabakachabaka.sabakalang.SabakaFileType
+import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes
 
 object SabakaPsiFactory {
 
