@@ -103,14 +103,14 @@ class SabakaClassElement(cls: SabakaClassDecl) : PsiTreeElementBase<SabakaClassD
 }
 
 private fun methodIcon(node: com.intellij.lang.ASTNode): Icon = when (node.firstChildNode?.elementType) {
-    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PRIVATE   -> AllIcons.Nodes.PrivateMethod
-    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PROTECTED -> AllIcons.Nodes.ProtectedMethod
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PRIVATE   -> AllIcons.Nodes.Private
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PROTECTED -> AllIcons.Nodes.Protected
     else -> AllIcons.Nodes.Method
 }
 
 private fun fieldIcon(node: com.intellij.lang.ASTNode): Icon = when (node.firstChildNode?.elementType) {
-    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PRIVATE   -> AllIcons.Nodes.PrivateField
-    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PROTECTED -> AllIcons.Nodes.ProtectedField
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PRIVATE   -> AllIcons.Nodes.Private
+    com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes.KW_PROTECTED -> AllIcons.Nodes.Protected
     else -> AllIcons.Nodes.Field
 }
 
