@@ -14,7 +14,7 @@ class NewSabakaFileAction : CreateFileFromTemplateAction(
     override fun buildDialog(project: Project, directory: PsiDirectory, builder: CreateFileFromTemplateDialog.Builder) {
         builder
             .setTitle("New SabakaLang File")
-            .addKind("SabakaLang File", SabakaFileType.INSTANCE.icon, "SabakaLang File")
+            .addKind("SabakaLang File", SabakaFileType.INSTANCE.icon, "SabakaLang File.sabaka")
     }
 
     override fun getActionName(directory: PsiDirectory, newName: String, templateName: String) =
