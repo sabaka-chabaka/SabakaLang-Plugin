@@ -43,30 +43,22 @@ class SabakaConfigurationFactory(type: ConfigurationType) : ConfigurationFactory
 }
 
 // ── Run configuration ─────────────────────────────────────────────────────────
+//
+// We store all settings as plain fields and serialize via readExternal/writeExternal.
+// This avoids the RunConfigurationOptions ClassCastException that occurs when the
+// platform creates a template config using its own classloader before the plugin
+// classloader is wired up.
 
 class SabakaRunConfiguration(
     project: Project,
     factory: ConfigurationFactory,
     name: String
-) : RunConfigurationBase<SabakaRunConfigurationOptions>(project, factory, name) {
+) : RunConfigurationBase<RunConfigurationOptions>(project, factory, name) {
 
-    override fun getOptions() = super.getOptions() as SabakaRunConfigurationOptions
-
-    var scriptPath: String
-        get()      = options.scriptPath ?: ""
-        set(value) { options.scriptPath = value }
-
-    var interpreterPath: String
-        get()      = options.interpreterPath ?: "sabaka"
-        set(value) { options.interpreterPath = value }
-
-    var programArguments: String
-        get()      = options.programArguments ?: ""
-        set(value) { options.programArguments = value }
-
-    var workingDirectory: String
-        get()      = options.workingDirectory ?: project.basePath ?: ""
-        set(value) { options.workingDirectory = value }
+    var scriptPath: String       = ""
+    var interpreterPath: String  = "sabaka"
+    var programArguments: String = ""
+    var workingDirectory: String = project.basePath ?: ""
 
     override fun getConfigurationEditor(): SettingsEditor<out RunConfiguration> =
         SabakaRunSettingsEditor(project)
@@ -80,10 +72,10 @@ class SabakaRunConfiguration(
 
     override fun readExternal(element: Element) {
         super.readExternal(element)
-        scriptPath       = element.getAttributeValue("scriptPath") ?: ""
-        interpreterPath  = element.getAttributeValue("interpreterPath") ?: "sabaka"
+        scriptPath       = element.getAttributeValue("scriptPath")       ?: ""
+        interpreterPath  = element.getAttributeValue("interpreterPath")  ?: "sabaka"
         programArguments = element.getAttributeValue("programArguments") ?: ""
-        workingDirectory = element.getAttributeValue("workingDirectory") ?: ""
+        workingDirectory = element.getAttributeValue("workingDirectory") ?: project.basePath ?: ""
     }
 
     override fun writeExternal(element: Element) {
@@ -95,12 +87,7 @@ class SabakaRunConfiguration(
     }
 }
 
-class SabakaRunConfigurationOptions : RunConfigurationOptions() {
-    var scriptPath: String?       = null
-    var interpreterPath: String?  = "sabaka"
-    var programArguments: String? = null
-    var workingDirectory: String? = null
-}
+// SabakaRunConfigurationOptions removed — no longer needed
 
 // ── Run state ─────────────────────────────────────────────────────────────────
 

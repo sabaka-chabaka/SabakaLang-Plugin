@@ -197,7 +197,7 @@ class SabakaAnnotator : Annotator {
         }
     }
 
-    // ── Variable reference ────────────────────────────────────────────────────
+    // ── Variable reference ────────────────────────────────────────────────────────
 
     private fun annotateVarRef(
         element: SabakaCompositeElement,
@@ -209,17 +209,29 @@ class SabakaAnnotator : Annotator {
         if (nameNode.elementType != SabakaTokenTypes.IDENTIFIER) return
         val name = nameNode.text
 
-        // Skip keywords and type names that appear as expressions
+        // Skip keywords, builtins and known type names
         if (name in SabakaBuiltins.ALL_KEYWORDS) return
         if (name in symbols.classes || name in symbols.structs || name in symbols.enums) return
+        if (name in SabakaBuiltins.GLOBAL_NAMES) return
+
+        // Skip left-hand side of assignments: x = expr
+        val parentNode = element.node.treeParent
+        if (parentNode?.elementType == SabakaElementTypes.ASSIGN_STMT &&
+            parentNode.firstChildNode == element.node) return
+
+        // Skip identifier being declared in a var decl (should be VAR_DECL_STMT not VAR_EXPR,
+        // but guard just in case the parser places it here)
+        if (parentNode?.elementType == SabakaElementTypes.VAR_DECL_STMT) return
 
         // Collect all visible names from enclosing scopes
         val visible = buildVisibleNames(element, symbols)
 
+        // Use WEAK_WARNING (not ERROR) to avoid false positives:
+        // scope resolution is conservative and may miss fields, foreach/for loop vars, etc.
         if (name !in visible) {
             holder.newAnnotation(
-                HighlightSeverity.ERROR,
-                "Unresolved identifier '${name}'"
+                HighlightSeverity.WEAK_WARNING,
+                "Possibly unresolved identifier '$name'"
             )
                 .range(nameNode.textRange)
                 .create()
