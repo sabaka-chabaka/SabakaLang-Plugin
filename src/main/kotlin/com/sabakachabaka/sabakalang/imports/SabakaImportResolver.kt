@@ -25,7 +25,7 @@ object SabakaImportResolver {
         val enumMembers: Set<String>                    = emptySet(),
         val classParents: Map<String, String>           = emptyMap(),
         val classInterfaces: Map<String, List<String>>  = emptyMap(),
-        val directMembers: Map<String, List<MemberInfo>>= emptyMap(),
+        val directMembers: Map<String, List<MemberInfo>> = emptyMap(),
         val structFields: Map<String, List<MemberInfo>> = emptyMap(),
         val interfaceMethods: Map<String, Set<String>>  = emptyMap(),
         // Source file paths that were successfully resolved
@@ -53,10 +53,10 @@ object SabakaImportResolver {
         val enums        = mutableSetOf<String>()
         val enumMembers  = mutableSetOf<String>()
         val classParents = mutableMapOf<String, String>()
-        val classIfaces  = mutableMapOf<String, MutableList<String>>()
-        val directMem    = mutableMapOf<String, MutableList<MemberInfo>>()
-        val structFields = mutableMapOf<String, MutableList<MemberInfo>>()
-        val ifaceMethods = mutableMapOf<String, MutableSet<String>>()
+        val classIfaces: MutableMap<String, MutableList<String>> = mutableMapOf()
+        val directMem: MutableMap<String, MutableList<MemberInfo>> = mutableMapOf()
+        val structFields: MutableMap<String, MutableList<MemberInfo>> = mutableMapOf()
+        val ifaceMethods: MutableMap<String, MutableSet<String>> = mutableMapOf()
         val resolved     = mutableSetOf<String>()
         val missing      = mutableSetOf<String>()
 
@@ -89,24 +89,33 @@ object SabakaImportResolver {
             enums.addAll(transitive.enums)
             enumMembers.addAll(transitive.enumMembers)
             classParents.putAll(transitive.classParents)
-            transitive.classInterfaces.forEach { (k, v) ->
-                classIfaces.getOrPut(k) { mutableListOf() }.addAll(v)
+            transitive.classInterfaces.forEach { entry ->
+                classIfaces.getOrPut(entry.key) { mutableListOf() }.addAll(entry.value)
             }
-            transitive.directMembers.forEach { (k, v) ->
-                directMem.getOrPut(k) { mutableListOf() }.addAll(v)
+            transitive.directMembers.forEach { entry ->
+                directMem.getOrPut(entry.key) { mutableListOf() }.addAll(entry.value)
             }
-            transitive.structFields.forEach { (k, v) ->
-                structFields.getOrPut(k) { mutableListOf() }.addAll(v)
+            transitive.structFields.forEach { entry ->
+                structFields.getOrPut(entry.key) { mutableListOf() }.addAll(entry.value)
             }
-            transitive.interfaceMethods.forEach { (k, v) ->
-                ifaceMethods.getOrPut(k) { mutableSetOf() }.addAll(v)
+            transitive.interfaceMethods.forEach { entry ->
+                ifaceMethods.getOrPut(entry.key) { mutableSetOf() }.addAll(entry.value)
             }
         }
 
         return ImportedSymbols(
-            functions, classes, structs, enums, enumMembers,
-            classParents, classIfaces, directMem, structFields, ifaceMethods,
-            resolved, missing
+            functions        = functions,
+            classes          = classes,
+            structs          = structs,
+            enums            = enums,
+            enumMembers      = enumMembers,
+            classParents     = classParents,
+            classInterfaces  = classIfaces,
+            directMembers    = directMem,
+            structFields     = structFields,
+            interfaceMethods = ifaceMethods,
+            resolvedPaths    = resolved,
+            missingPaths     = missing
         )
     }
 

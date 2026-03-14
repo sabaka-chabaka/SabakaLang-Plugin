@@ -496,6 +496,29 @@ class SymbolTable private constructor(
                 .resolveDllImports(file, project)
                 .associateBy { it.alias }
 
+            // Merge: explicit types to avoid inference ambiguity
+            val mergedClassInterfaces: Map<String, List<String>> =
+                (local.classInterfaces.keys + imported.classInterfaces.keys)
+                    .associateWith { k: String ->
+                        val a: List<String> = local.classInterfaces[k] ?: emptyList()
+                        val b: List<String> = imported.classInterfaces[k] ?: emptyList()
+                        a + b
+                    }
+            val mergedDirectMembers: Map<String, List<MemberInfo>> =
+                (local.directMembers.keys + imported.directMembers.keys)
+                    .associateWith { k: String ->
+                        val a: List<MemberInfo> = local.directMembers[k] ?: emptyList()
+                        val b: List<MemberInfo> = imported.directMembers[k] ?: emptyList()
+                        a + b
+                    }
+            val mergedIfaceMethods: Map<String, Set<String>> =
+                (local.interfaceMethods.keys + imported.interfaceMethods.keys)
+                    .associateWith { k: String ->
+                        val a: Set<String> = local.interfaceMethods[k] ?: emptySet()
+                        val b: Set<String> = imported.interfaceMethods[k] ?: emptySet()
+                        a + b
+                    }
+
             return SymbolTable(
                 functions        = local.functions + imported.functions,
                 classes          = local.classes + imported.classes,
@@ -503,22 +526,10 @@ class SymbolTable private constructor(
                 enums            = local.enums + imported.enums,
                 enumMembers      = local.enumMembers + imported.enumMembers,
                 classParents     = local.classParents + imported.classParents,
-                classInterfaces  = (local.classInterfaces.keys + imported.classInterfaces.keys)
-                                       .associateWith { k ->
-                                           (local.classInterfaces[k] ?: emptyList()) +
-                                           (imported.classInterfaces[k] ?: emptyList())
-                                       },
-                directMembers    = (local.directMembers.keys + imported.directMembers.keys)
-                                       .associateWith { k ->
-                                           (local.directMembers[k] ?: emptyList()) +
-                                           (imported.directMembers[k] ?: emptyList())
-                                       },
+                classInterfaces  = mergedClassInterfaces,
+                directMembers    = mergedDirectMembers,
                 structFields     = local.structFields + imported.structFields,
-                interfaceMethods = (local.interfaceMethods.keys + imported.interfaceMethods.keys)
-                                       .associateWith { k ->
-                                           (local.interfaceMethods[k] ?: emptySet()) +
-                                           (imported.interfaceMethods[k] ?: emptySet())
-                                       },
+                interfaceMethods = mergedIfaceMethods,
                 dllModules       = dllModules
             )
         }
