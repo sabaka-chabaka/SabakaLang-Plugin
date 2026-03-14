@@ -169,25 +169,36 @@ class SabakaAnnotator : Annotator {
     }
 
     // ── Member access: obj.field / obj.method() / super::method() ────────────
+    //
+    //  MEMBER_ACCESS_EXPR node layout (from the parser):
+    //    child[0] = object  (VAR_EXPR | SUPER_EXPR | CALL_EXPR | ...)
+    //    child[1] = DOT or COLONCOLON
+    //    child[2] = IDENTIFIER  (member name)
+    //    child[3] = ARG_LIST    (optional, present when it's a call)
 
     private fun annotateMemberAccess(
         element: SabakaCompositeElement,
         symbols: SymbolTable,
         holder: AnnotationHolder
     ) {
-        // MEMBER_ACCESS_EXPR has children: [object_expr] DOT/:: [member_name]
         val children = element.node.getChildren(null)
-        val memberNameNode = children.lastOrNull {
+            .filter { it.psi.textLength > 0 }  // skip empty nodes
+
+        // Find the separator (DOT or COLONCOLON)
+        val sepIdx = children.indexOfFirst {
+            it.elementType == SabakaTokenTypes.DOT ||
+            it.elementType == SabakaTokenTypes.COLONCOLON
+        }
+        if (sepIdx < 1 || sepIdx + 1 >= children.size) return
+
+        val objNode   = children[sepIdx - 1]   // node before the dot
+        val afterSep  = children.drop(sepIdx + 1)
+
+        // Member name = first IDENTIFIER after separator (skip ARG_LIST etc.)
+        val memberNameNode = afterSep.firstOrNull {
             it.elementType == SabakaTokenTypes.IDENTIFIER
         } ?: return
         val memberName = memberNameNode.text
-
-        // Determine object type — we only check when object is a plain variable
-        // (full type inference is out of scope, we just handle the most common patterns)
-        val objNode = children.firstOrNull {
-            it.elementType == SabakaElementTypes.VAR_EXPR ||
-            it.elementType == SabakaElementTypes.SUPER_EXPR
-        } ?: return
 
         val isSuper = objNode.elementType == SabakaElementTypes.SUPER_EXPR
         val currentClass = enclosingClassName(element)
@@ -273,36 +284,80 @@ class SabakaAnnotator : Annotator {
     // Walks scopes upward looking for a VarDeclStmt or Param with matching name,
     // then extracts the type token text (first child of the node).
 
+    /**
+     * Resolve the declared type name of a variable/param called [name],
+     * searching from [from] upward through all enclosing scopes including
+     * top-level file scope.
+     *
+     * For  `a ab = new a();`  the VarDeclStmt node looks like:
+     *   TYPE_REF("a")  IDENTIFIER("ab")  EQ  NEW_EXPR(...)
+     * So the type is the text of the TYPE_REF child (first child of the node).
+     *
+     * Returns null if not found or if the type is a primitive (int/float/etc.).
+     */
     private fun resolveLocalType(name: String, from: PsiElement, symbols: SymbolTable): String? {
-        // Check if it's a known class/struct name used directly (static/enum access)
+        // Direct class/struct name used as receiver:  a.foo()  ClassName.field
         if (name in symbols.classes) return name
         if (name in symbols.structs) return name
 
+        // Walk up scopes from the call site toward the file root
         var scope: PsiElement? = from.parent
         while (scope != null) {
-            // Params
+            // Params declared in this scope (function/method parameters)
             PsiTreeUtil.getChildrenOfType(scope, SabakaParam::class.java)
                 ?.firstOrNull { it.name == name }
-                ?.let { param ->
-                    // type is the first child node text
-                    return param.node.firstChildNode?.text
-                }
-            // Var decls in this scope
+                ?.let { param -> return typeTextOf(param.node) }
+
+            // Var decls that are DIRECT children of this scope node
+            // (handles: block locals, file-level top-level vars like `a ab = new a();`)
             PsiTreeUtil.getChildrenOfType(scope, SabakaVarDeclStmt::class.java)
                 ?.firstOrNull { it.name == name }
-                ?.let { v ->
-                    return v.node.firstChildNode?.text
-                }
-            // Also search recursively inside BLOCK children for deeper vars
-            PsiTreeUtil.findChildrenOfType(scope, SabakaVarDeclStmt::class.java)
-                .firstOrNull { it.name == name }
-                ?.let { v ->
-                    return v.node.firstChildNode?.text
-                }
-            if (scope is SabakaFile) break
+                ?.let { v -> return typeTextOf(v.node) }
+
+            // For BLOCK nodes: search recursively within this block only,
+            // but NOT into nested class/struct bodies (avoid picking up field decls)
+            if (scope.node?.elementType == SabakaElementTypes.BLOCK ||
+                scope is SabakaFile) {
+                PsiTreeUtil.findChildrenOfType(scope, SabakaVarDeclStmt::class.java)
+                    .filter { v ->
+                        // Exclude vars inside class/struct bodies
+                        var p = v.parent
+                        var insideClass = false
+                        while (p != null && p != scope) {
+                            if (p is SabakaClassDecl || p is SabakaStructDecl) {
+                                insideClass = true; break
+                            }
+                            p = p.parent
+                        }
+                        !insideClass
+                    }
+                    .firstOrNull { it.name == name }
+                    ?.let { v -> return typeTextOf(v.node) }
+            }
+
             scope = scope.parent
         }
         return null
+    }
+
+    /**
+     * Extract the type name from a VarDeclStmt or Param AST node.
+     * Layout: TYPE_REF  IDENTIFIER  [= expr]
+     * We return the text of the first child (TYPE_REF or first token of type).
+     * Returns null for primitives since those can't have members.
+     */
+    private fun typeTextOf(node: com.intellij.lang.ASTNode): String? {
+        // First child should be TYPE_REF, whose own first child is the type name token
+        val typeRef = node.firstChildNode ?: return null
+        val typeName = if (typeRef.elementType == SabakaElementTypes.TYPE_REF)
+            typeRef.firstChildNode?.text
+        else
+            typeRef.text
+        // Ignore primitives — they don't have class members
+        return when (typeName) {
+            "int", "float", "bool", "string", "void", null -> null
+            else -> typeName
+        }
     }
 
     // ── super context ─────────────────────────────────────────────────────────
