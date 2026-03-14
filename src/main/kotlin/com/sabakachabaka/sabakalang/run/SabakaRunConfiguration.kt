@@ -12,7 +12,6 @@ import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ProgramRunner
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
@@ -22,6 +21,7 @@ import com.intellij.ui.components.fields.ExpandableTextField
 import com.intellij.util.ui.FormBuilder
 import com.sabakachabaka.sabakalang.SabakaFileType
 import com.sabakachabaka.sabakalang.psi.SabakaFile
+import com.sabakachabaka.sabakalang.settings.SabakaSettings
 import org.jdom.Element
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -44,10 +44,10 @@ class SabakaConfigurationFactory(type: ConfigurationType) : ConfigurationFactory
 
 // ── Run configuration ─────────────────────────────────────────────────────────
 //
-// We store all settings as plain fields and serialize via readExternal/writeExternal.
-// This avoids the RunConfigurationOptions ClassCastException that occurs when the
-// platform creates a template config using its own classloader before the plugin
-// classloader is wired up.
+// Fields are stored directly to avoid RunConfigurationOptions ClassCastException.
+// The platform creates a template config before the plugin classloader is fully
+// wired — using RunConfigurationBase<RunConfigurationOptions> (not a custom subclass)
+// prevents the cast failure entirely.
 
 class SabakaRunConfiguration(
     project: Project,
@@ -56,15 +56,28 @@ class SabakaRunConfiguration(
 ) : RunConfigurationBase<RunConfigurationOptions>(project, factory, name) {
 
     var scriptPath: String       = ""
-    var interpreterPath: String  = "sabaka"
     var programArguments: String = ""
-    var workingDirectory: String = project.basePath ?: ""
+
+    // interpreterPath falls back to global settings when blank
+    var interpreterPath: String  = ""
+        get() = field.ifBlank { SabakaSettings.getInstance().interpreterPath }
+
+    // workingDirectory falls back to script dir, then global settings default
+    var workingDirectory: String = ""
+        get() = field.ifBlank {
+            SabakaSettings.getInstance().defaultWorkingDir.ifBlank {
+                project.basePath ?: ""
+            }
+        }
 
     override fun getConfigurationEditor(): SettingsEditor<out RunConfiguration> =
         SabakaRunSettingsEditor(project)
 
     override fun checkConfiguration() {
         if (scriptPath.isBlank()) throw RuntimeConfigurationError("Script path is not set")
+        if (interpreterPath.isBlank()) throw RuntimeConfigurationError(
+            "SabakaLang interpreter path is not set. Configure it in Settings → Tools → SabakaLang"
+        )
     }
 
     override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState =
@@ -73,9 +86,9 @@ class SabakaRunConfiguration(
     override fun readExternal(element: Element) {
         super.readExternal(element)
         scriptPath       = element.getAttributeValue("scriptPath")       ?: ""
-        interpreterPath  = element.getAttributeValue("interpreterPath")  ?: "sabaka"
+        interpreterPath  = element.getAttributeValue("interpreterPath")  ?: ""
         programArguments = element.getAttributeValue("programArguments") ?: ""
-        workingDirectory = element.getAttributeValue("workingDirectory") ?: project.basePath ?: ""
+        workingDirectory = element.getAttributeValue("workingDirectory") ?: ""
     }
 
     override fun writeExternal(element: Element) {
@@ -87,8 +100,6 @@ class SabakaRunConfiguration(
     }
 }
 
-// SabakaRunConfigurationOptions removed — no longer needed
-
 // ── Run state ─────────────────────────────────────────────────────────────────
 
 class SabakaRunState(
@@ -98,11 +109,16 @@ class SabakaRunState(
 
     override fun execute(executor: Executor?, runner: ProgramRunner<*>): ExecutionResult {
         val cmd = GeneralCommandLine()
-        cmd.exePath = cfg.interpreterPath.ifBlank { "sabaka" }
+        cmd.exePath = cfg.interpreterPath
         cmd.addParameter(cfg.scriptPath)
         if (cfg.programArguments.isNotBlank())
             cfg.programArguments.split(" ").filter { it.isNotBlank() }.forEach { cmd.addParameter(it) }
-        cmd.setWorkDirectory(cfg.workingDirectory.ifBlank { cfg.project.basePath })
+
+        // Working dir: prefer explicit config → script's own dir → global default
+        val wd = cfg.workingDirectory.ifBlank {
+            cfg.scriptPath.substringBeforeLast('/').substringBeforeLast('\\')
+        }
+        cmd.setWorkDirectory(wd.ifBlank { cfg.project.basePath })
 
         val handler: ProcessHandler = ColoredProcessHandler(cmd)
         ProcessTerminatedListener.attach(handler)
@@ -117,7 +133,7 @@ class SabakaRunState(
     }
 }
 
-// ── Console error filter — makes "line 42" clickable ─────────────────────────
+// ── Console filter — makes "line 42" in errors clickable ─────────────────────
 
 class SabakaConsoleFilter(private val project: Project) : Filter {
     private val pattern = Regex("""(?:line\s+|:)(\d+)""")
@@ -127,14 +143,8 @@ class SabakaConsoleFilter(private val project: Project) : Filter {
         val lineNum = match.groupValues[1].toIntOrNull()?.minus(1) ?: return null
         val start = entireLength - line.length + match.range.first
         val end   = entireLength - line.length + match.range.last + 1
-
-        // Try to find the active sabaka file
-        val vFile = project.basePath?.let {
-            LocalFileSystem.getInstance().findFileByPath(it)
-        } ?: return null
-
-        val info = OpenFileHyperlinkInfo(project, vFile, lineNum)
-        return Filter.Result(start, end, info)
+        val vFile = project.basePath?.let { LocalFileSystem.getInstance().findFileByPath(it) } ?: return null
+        return Filter.Result(start, end, OpenFileHyperlinkInfo(project, vFile, lineNum))
     }
 }
 
@@ -148,10 +158,12 @@ class SabakaRunSettingsEditor(project: Project) : SettingsEditor<SabakaRunConfig
     private val workDirField     = TextFieldWithBrowseButton()
 
     private val panel: JPanel = FormBuilder.createFormBuilder()
-        .addLabeledComponent("Script path:",       scriptField)
-        .addLabeledComponent("Interpreter path:",  interpreterField)
-        .addLabeledComponent("Program arguments:", argsField)
-        .addLabeledComponent("Working directory:", workDirField)
+        .addLabeledComponent("Script path:",                    scriptField)
+        .addLabeledComponent("Interpreter path (optional):",   interpreterField)
+        .addTooltip("Leave blank to use the path from Settings → Tools → SabakaLang")
+        .addLabeledComponent("Program arguments:",             argsField)
+        .addLabeledComponent("Working directory (optional):",  workDirField)
+        .addTooltip("Leave blank to use the script's directory")
         .addComponentFillVertically(JPanel(), 0)
         .panel
 
@@ -172,7 +184,7 @@ class SabakaRunSettingsEditor(project: Project) : SettingsEditor<SabakaRunConfig
     override fun createEditor(): JComponent = panel
 }
 
-// ── Run configuration producer (auto-detect from .sabaka file) ────────────────
+// ── Run configuration producer — auto-creates config from any .sabaka file ───
 
 class SabakaRunConfigurationProducer :
     RunConfigurationProducer<SabakaRunConfiguration>(
@@ -187,9 +199,10 @@ class SabakaRunConfigurationProducer :
     ): Boolean {
         val file = ctx.location?.psiElement?.containingFile as? SabakaFile ?: return false
         val vFile = file.virtualFile ?: return false
-        cfg.scriptPath = vFile.path
-        cfg.name = vFile.nameWithoutExtension
+        cfg.scriptPath       = vFile.path
+        cfg.name             = vFile.nameWithoutExtension
         cfg.workingDirectory = vFile.parent?.path ?: ""
+        // interpreter comes from global settings by default (field left blank)
         return true
     }
 

@@ -12,25 +12,36 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <!--  ── Language ────────────────────────────────────────────────  -->
         <fileType name="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaFileType" fieldName="INSTANCE" language="SabakaLang" extensions="sabaka"/>
         <lang.parserDefinition language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.parser.SabakaParserDefinition"/>
+        <!--  ── Highlighting ────────────────────────────────────────────  -->
         <lang.syntaxHighlighterFactory language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.highlighting.SabakaSyntaxHighlighterFactory"/>
         <colorSettingsPage implementation="com.sabakachabaka.sabakalang.highlighting.SabakaColorSettingsPage"/>
         <annotator language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.annotator.SabakaAnnotator"/>
+        <!--  ── Editing helpers ─────────────────────────────────────────  -->
         <lang.braceMatcher language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaBraceMatcher"/>
         <lang.commenter language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaCommenter"/>
         <lang.foldingBuilder language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.folding.SabakaFoldingBuilder"/>
+        <!--  ── Navigation ──────────────────────────────────────────────  -->
         <lang.psiStructureViewFactory language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.structure.SabakaStructureViewFactory"/>
-        <completion.contributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.completion.SabakaCompletionContributor"/>
         <lang.findUsagesProvider language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.find.SabakaFindUsagesProvider"/>
         <psi.referenceContributor language="SabakaLang" implementation="com.sabakachabaka.sabakalang.SabakaReferenceContributor"/>
+        <lang.documentationProvider language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaDocumentationProvider"/>
+        <!--  ── Completion ──────────────────────────────────────────────  -->
+        <completion.contributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.completion.SabakaCompletionContributor"/>
+        <!--  ── Formatter ───────────────────────────────────────────────  -->
         <lang.formatter language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.formatter.SabakaFormattingModelBuilder"/>
         <codeStyleSettingsProvider implementation="com.sabakachabaka.sabakalang.formatter.SabakaCodeStyleSettingsProvider"/>
         <langCodeStyleSettingsProvider implementation="com.sabakachabaka.sabakalang.formatter.SabakaLanguageCodeStyleSettingsProvider"/>
+        <!--  ── Run ─────────────────────────────────────────────────────  -->
         <configurationType implementation="com.sabakachabaka.sabakalang.run.SabakaRunConfigurationType"/>
         <runConfigurationProducer implementation="com.sabakachabaka.sabakalang.run.SabakaRunConfigurationProducer"/>
         <runLineMarkerContributor language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.run.SabakaRunLineMarkerContributor"/>
-        <lang.documentationProvider language="SabakaLang" implementationClass="com.sabakachabaka.sabakalang.SabakaDocumentationProvider"/>
+        <!--  ── Settings ────────────────────────────────────────────────  -->
+        <applicationService serviceImplementation="com.sabakachabaka.sabakalang.settings.SabakaSettings"/>
+        <applicationConfigurable parentId="tools" instance="com.sabakachabaka.sabakalang.settings.SabakaSettingsConfigurable" id="com.sabakachabaka.sabakalang.settings" displayName="SabakaLang"/>
+        <!--  ── Misc ────────────────────────────────────────────────────  -->
         <internalFileTemplate name="SabakaLang File"/>
         <notificationGroup id="SabakaLang" displayType="BALLOON"/>
     </extensions>

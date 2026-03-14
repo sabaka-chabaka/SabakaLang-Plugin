@@ -69,16 +69,24 @@ private class ParseContext(private val b: PsiBuilder) {
     fun parseFile() {
         while (!eof()) {
             when {
-                at(TT.KW_IMPORT)    -> parseImport()
-                at(TT.KW_CLASS)     -> parseClass()
-                at(TT.KW_STRUCT)    -> parseStruct()
-                at(TT.KW_ENUM)      -> parseEnum()
-                at(TT.KW_INTERFACE) -> parseInterface()
-                // access modifier before class/struct/interface
+                at(TT.KW_IMPORT)     -> parseImport()
+                at(TT.KW_CLASS)      -> parseClass()
+                at(TT.KW_STRUCT)     -> parseStruct()
+                at(TT.KW_ENUM)       -> parseEnum()
+                at(TT.KW_INTERFACE)  -> parseInterface()
                 isAccessModifier() && peekAfterModifierIsDecl() -> parseAccessModifiedDecl()
-                // Function or top-level statement: both start with a type token
-                isTypeStart()    -> parseTopLevelTypeStart()
-                else             -> { b.error("Unexpected '${text()}'"); advance() }
+                // Function decl or top-level var decl starts with a type token
+                isTypeStart()        -> parseTopLevelTypeStart()
+                // All statement keywords valid at top level too
+                at(TT.KW_IF)         -> parseIfStmt()
+                at(TT.KW_WHILE)      -> parseWhileStmt()
+                at(TT.KW_FOR)        -> parseForStmt()
+                at(TT.KW_FOREACH)    -> parseForeachStmt()
+                at(TT.KW_SWITCH)     -> parseSwitchStmt()
+                at(TT.KW_RETURN)     -> parseReturnStmt()
+                at(TT.LBRACE)        -> parseBlock()
+                // Expression statement: assignment, call, etc.
+                else                 -> parseExprStmt()
             }
         }
     }
@@ -421,6 +429,9 @@ private class ParseContext(private val b: PsiBuilder) {
     }
 
     private fun parseExprStmt() {
+        // Guard: skip tokens that can never start an expression to avoid infinite loops.
+        // This can happen if we land here with a keyword that wasn't caught above.
+        if (at(TT.RBRACE) || at(TT.RBRACKET) || at(TT.RPAREN) || eof()) return
         val m = mark()
         parseExpr()
         consume(TT.SEMICOLON)

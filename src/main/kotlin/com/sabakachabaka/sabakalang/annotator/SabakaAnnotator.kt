@@ -13,85 +13,72 @@ import com.sabakachabaka.sabakalang.psi.*
 /**
  * Semantic annotator for SabakaLang.
  *
- * Covers every CompilerException and SemanticException from Compiler.cs:
+ * ── Semantic highlighting ─────────────────────────────────────────────────────
+ *   • Function/method declaration names → FUNC_DECL
+ *   • Class / struct / enum names       → CLASS/STRUCT/ENUM
+ *   • Parameters                        → PARAM
+ *   • Local variables                   → LOCAL_VAR
+ *   • Built-in function calls           → BUILTIN_CALL
+ *   • User function calls               → FUNC_CALL
  *
- * ── Semantic highlighting ──────────────────────────────────────────────────
- *   • Function/method declaration names → FUNC_DECL color
- *   • Class/struct/enum names           → CLASS/STRUCT/ENUM color
- *   • Parameters                        → PARAM color
- *   • Local variables                   → LOCAL_VAR color
- *   • Built-in calls                    → BUILTIN_CALL color
- *   • User function calls               → FUNC_CALL color
- *
- * ── Diagnostics (ERROR) ───────────────────────────────────────────────────
+ * ── Diagnostics (ERROR) ───────────────────────────────────────────────────────
  *   • Wrong argument count for built-in functions
- *   • Calling unknown function (not builtin, not user-defined, not class)
- *   • Accessing private/protected member from wrong context
+ *   • Calling unknown function (not builtin, not user-defined, not class/struct)
  *   • Class does not implement all interface methods
- *   • Undefined variable reference
+ *   • Duplicate top-level function name
  *   • `super` used outside class
- *   • `override` used on a function not matching any base-class method
+ *   • `override` without matching base-class method
  *
- * ── Diagnostics (WARNING) ─────────────────────────────────────────────────
- *   • Duplicate function name at top level
- *   • Field shadowing a base-class field
- *   • Unreachable code after return
+ * NOTE: Unresolved variable checks are intentionally omitted.
+ * SabakaLang allows top-level statements, foreach vars, switch vars, and
+ * generic type parameters — a full scope resolver would be needed to avoid
+ * constant false positives. Function/call resolution is precise enough to be useful.
  */
 class SabakaAnnotator : Annotator {
 
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
         val file = element.containingFile as? SabakaFile ?: return
-
-        // Build a lightweight file-level symbol table on first real element
         val symbols = SymbolTable.of(file)
 
         when (element) {
 
-            // ── Declarations: semantic highlighting ──────────────────────────
+            // ── Declaration highlights ────────────────────────────────────
 
             is SabakaFuncDecl -> {
                 highlightName(element, SabakaColors.FUNC_DECL, holder)
-                checkDuplicateTopLevelFunc(element, symbols, holder)
+                if (element.parent is SabakaFile) {
+                    checkDuplicateTopLevelFunc(element, file, holder)
+                }
                 checkOverrideValid(element, symbols, holder)
             }
 
-            is SabakaMethodDecl -> {
-                highlightName(element, SabakaColors.FUNC_DECL, holder)
-            }
-
-            is SabakaClassDecl -> {
+            is SabakaMethodDecl -> highlightName(element, SabakaColors.FUNC_DECL, holder)
+            is SabakaClassDecl  -> {
                 highlightName(element, SabakaColors.CLASS_NAME, holder)
                 checkInterfaceImplementation(element, symbols, holder)
             }
-
             is SabakaStructDecl -> highlightName(element, SabakaColors.STRUCT_NAME, holder)
-
-            is SabakaEnumDecl -> highlightName(element, SabakaColors.ENUM_NAME, holder)
-
-            is SabakaParam -> highlightName(element, SabakaColors.PARAM, holder)
-
+            is SabakaEnumDecl   -> highlightName(element, SabakaColors.ENUM_NAME, holder)
+            is SabakaParam      -> highlightName(element, SabakaColors.PARAM, holder)
             is SabakaVarDeclStmt -> highlightName(element, SabakaColors.LOCAL_VAR, holder)
 
-            is SabakaFieldDecl -> {
-                // Fields inside classes/structs: no extra color by default, but check duplicate in class
-            }
+            // ── Composite nodes ───────────────────────────────────────────
 
-            // ── Composite nodes: call expressions & variable refs ─────────────
-
-            is SabakaCompositeElement -> {
-                when (element.node.elementType) {
-                    SabakaElementTypes.CALL_EXPR -> annotateCall(element, symbols, file, holder)
-                    SabakaElementTypes.VAR_EXPR  -> annotateVarRef(element, symbols, file, holder)
-                    SabakaElementTypes.SUPER_EXPR -> checkSuperContext(element, holder)
-                    else -> {}
-                }
+            is SabakaCompositeElement -> when (element.node.elementType) {
+                SabakaElementTypes.CALL_EXPR  -> annotateCall(element, symbols, holder)
+                SabakaElementTypes.SUPER_EXPR -> checkSuperContext(element, holder)
+                else -> {}
             }
         }
     }
 
-    // ── Highlight helper ──────────────────────────────────────────────────────
+    // ── Semantic highlight helpers ────────────────────────────────────────────
 
-    private fun highlightName(el: SabakaNamedElement, color: com.intellij.openapi.editor.colors.TextAttributesKey, holder: AnnotationHolder) {
+    private fun highlightName(
+        el: SabakaNamedElement,
+        color: com.intellij.openapi.editor.colors.TextAttributesKey,
+        holder: AnnotationHolder
+    ) {
         el.nameIdentifier?.let { id ->
             holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
                 .range(id.textRange)
@@ -105,7 +92,6 @@ class SabakaAnnotator : Annotator {
     private fun annotateCall(
         element: SabakaCompositeElement,
         symbols: SymbolTable,
-        file: SabakaFile,
         holder: AnnotationHolder
     ) {
         val nameNode = element.node.firstChildNode ?: return
@@ -113,413 +99,233 @@ class SabakaAnnotator : Annotator {
         val name = nameNode.text
         val nameRange = nameNode.textRange
 
-        // Count arguments
-        val argList = element.node.findChildByType(SabakaElementTypes.ARG_LIST)
-        val argCount = argList?.let {
-            it.getChildren(null).count { child ->
-                child.elementType != SabakaTokenTypes.LPAREN &&
-                child.elementType != SabakaTokenTypes.RPAREN &&
-                child.elementType != SabakaTokenTypes.COMMA &&
-                child.psi.textLength > 0
-            }
-        } ?: 0
+        // Count arguments (non-punctuation children of ARG_LIST)
+        val argCount = element.node.findChildByType(SabakaElementTypes.ARG_LIST)
+            ?.getChildren(null)
+            ?.count { ch ->
+                ch.elementType != SabakaTokenTypes.LPAREN &&
+                ch.elementType != SabakaTokenTypes.RPAREN &&
+                ch.elementType != SabakaTokenTypes.COMMA &&
+                ch.psi.textLength > 0
+            } ?: 0
 
         when {
-            // ── Built-in call ─────────────────────────────────────────────
+            // ── Built-in ──────────────────────────────────────────────────
             name in SabakaBuiltins.GLOBAL_NAMES -> {
                 val bi = SabakaBuiltins.GLOBAL_BY_NAME[name]!!
-
-                // Semantic highlight
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(nameRange)
-                    .textAttributes(SabakaColors.BUILTIN_CALL)
-                    .create()
+                    .range(nameRange).textAttributes(SabakaColors.BUILTIN_CALL).create()
 
-                // Argument count check (matches Compiler.cs exactly)
                 val expected = bi.params.size
-                val hasVararg = name == "print" // print accepts any single value
-                if (!hasVararg && argCount != expected) {
+                // print() is variadic (accepts any single value, type doesn't matter)
+                if (name != "print" && argCount != expected) {
+                    val paramStr = if (bi.params.isNotEmpty())
+                        " (${bi.params.joinToString(", ") { it.first }})" else ""
                     holder.newAnnotation(
                         HighlightSeverity.ERROR,
-                        "${name}() expects $expected argument${if (expected != 1) "s" else ""}" +
-                        if (bi.params.isNotEmpty()) " (${bi.params.joinToString(", ") { it.first }})" else "" +
-                        ", got $argCount"
-                    )
-                        .range(element.textRange)
-                        .create()
+                        "$name() expects $expected argument${if (expected != 1) "s" else ""}$paramStr, got $argCount"
+                    ).range(element.textRange).create()
                 }
             }
 
             // ── User-defined function ─────────────────────────────────────
             name in symbols.functions -> {
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(nameRange)
-                    .textAttributes(SabakaColors.FUNC_CALL)
-                    .create()
+                    .range(nameRange).textAttributes(SabakaColors.FUNC_CALL).create()
 
-                // Argument count check for user functions
-                val funcInfo = symbols.functions[name]
-                if (funcInfo != null && argCount != funcInfo.paramCount) {
+                val expected = symbols.functions[name]!!.paramCount
+                if (argCount != expected) {
                     holder.newAnnotation(
                         HighlightSeverity.ERROR,
-                        "Function '${name}' expects ${funcInfo.paramCount} argument${if (funcInfo.paramCount != 1) "s" else ""}, got $argCount"
-                    )
-                        .range(element.textRange)
-                        .create()
+                        "'$name' expects $expected argument${if (expected != 1) "s" else ""}, got $argCount"
+                    ).range(element.textRange).create()
                 }
             }
 
-            // ── Class constructor call ────────────────────────────────────
+            // ── Class / struct constructor ────────────────────────────────
             name in symbols.classes -> {
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(nameRange)
-                    .textAttributes(SabakaColors.CLASS_NAME)
-                    .create()
+                    .range(nameRange).textAttributes(SabakaColors.CLASS_NAME).create()
             }
 
-            // ── Struct construction ───────────────────────────────────────
             name in symbols.structs -> {
                 holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                    .range(nameRange)
-                    .textAttributes(SabakaColors.STRUCT_NAME)
-                    .create()
+                    .range(nameRange).textAttributes(SabakaColors.STRUCT_NAME).create()
             }
 
-            // ── Completely unknown ────────────────────────────────────────
+            // ── Unknown — ERROR only if it really looks like a call, not a ─
+            // ── method call (those have a dot before them, handled by postfix)
             else -> {
-                holder.newAnnotation(
-                    HighlightSeverity.ERROR,
-                    "Unresolved function or constructor '${name}'"
-                )
-                    .range(nameRange)
-                    .create()
+                // Only flag as error if parent is not a member access (obj.foo())
+                val parentType = element.node.treeParent?.elementType
+                if (parentType != SabakaElementTypes.MEMBER_ACCESS_EXPR &&
+                    parentType != SabakaElementTypes.CALL_EXPR) {
+                    holder.newAnnotation(
+                        HighlightSeverity.ERROR,
+                        "Unresolved function or constructor '$name'"
+                    ).range(nameRange).create()
+                }
             }
         }
     }
 
-    // ── Variable reference ────────────────────────────────────────────────────────
-
-    private fun annotateVarRef(
-        element: SabakaCompositeElement,
-        symbols: SymbolTable,
-        file: SabakaFile,
-        holder: AnnotationHolder
-    ) {
-        val nameNode = element.node.firstChildNode ?: return
-        if (nameNode.elementType != SabakaTokenTypes.IDENTIFIER) return
-        val name = nameNode.text
-
-        // Skip keywords, builtins and known type names
-        if (name in SabakaBuiltins.ALL_KEYWORDS) return
-        if (name in symbols.classes || name in symbols.structs || name in symbols.enums) return
-        if (name in SabakaBuiltins.GLOBAL_NAMES) return
-
-        // Skip left-hand side of assignments: x = expr
-        val parentNode = element.node.treeParent
-        if (parentNode?.elementType == SabakaElementTypes.ASSIGN_STMT &&
-            parentNode.firstChildNode == element.node) return
-
-        // Skip identifier being declared in a var decl (should be VAR_DECL_STMT not VAR_EXPR,
-        // but guard just in case the parser places it here)
-        if (parentNode?.elementType == SabakaElementTypes.VAR_DECL_STMT) return
-
-        // Collect all visible names from enclosing scopes
-        val visible = buildVisibleNames(element, symbols)
-
-        // Use WEAK_WARNING (not ERROR) to avoid false positives:
-        // scope resolution is conservative and may miss fields, foreach/for loop vars, etc.
-        if (name !in visible) {
-            holder.newAnnotation(
-                HighlightSeverity.WEAK_WARNING,
-                "Possibly unresolved identifier '$name'"
-            )
-                .range(nameNode.textRange)
-                .create()
-        }
-    }
-
-    // ── super context check ───────────────────────────────────────────────────
+    // ── super context ─────────────────────────────────────────────────────────
 
     private fun checkSuperContext(element: PsiElement, holder: AnnotationHolder) {
-        // super is only valid inside a class method
-        var parent = element.parent
-        while (parent != null) {
-            if (parent is SabakaClassDecl) return // OK — inside class
-            if (parent is SabakaFile) break       // top-level — error
-            parent = parent.parent
+        var p = element.parent
+        while (p != null) {
+            if (p is SabakaClassDecl) return
+            if (p is SabakaFile) break
+            p = p.parent
         }
-        holder.newAnnotation(
-            HighlightSeverity.ERROR,
-            "'super' can only be used inside a class"
-        )
-            .range(element.textRange)
-            .create()
+        holder.newAnnotation(HighlightSeverity.ERROR, "'super' can only be used inside a class")
+            .range(element.textRange).create()
     }
 
     // ── Duplicate top-level function ──────────────────────────────────────────
 
-    private fun checkDuplicateTopLevelFunc(
-        fn: SabakaFuncDecl,
-        symbols: SymbolTable,
-        holder: AnnotationHolder
-    ) {
+    private fun checkDuplicateTopLevelFunc(fn: SabakaFuncDecl, file: SabakaFile, holder: AnnotationHolder) {
         val name = fn.name ?: return
-        if (fn.parent !is SabakaFile) return          // only check top-level
-        val allTopFuncs = PsiTreeUtil.findChildrenOfType(fn.containingFile, SabakaFuncDecl::class.java)
+        val dupes = PsiTreeUtil.findChildrenOfType(file, SabakaFuncDecl::class.java)
             .filter { it.parent is SabakaFile && it.name == name }
-        if (allTopFuncs.size > 1 && allTopFuncs.first() != fn) {
-            fn.nameIdentifier?.let { id ->
-                holder.newAnnotation(
-                    HighlightSeverity.ERROR,
-                    "Duplicate function declaration '${name}'"
-                )
-                    .range(id.textRange)
-                    .create()
+        if (dupes.size > 1 && dupes.first() != fn) {
+            fn.nameIdentifier?.let {
+                holder.newAnnotation(HighlightSeverity.ERROR, "Duplicate function '$name'")
+                    .range(it.textRange).create()
             }
         }
     }
 
-    // ── override validity check ───────────────────────────────────────────────
+    // ── override validity ─────────────────────────────────────────────────────
 
-    private fun checkOverrideValid(
-        fn: SabakaFuncDecl,
-        symbols: SymbolTable,
-        holder: AnnotationHolder
-    ) {
-        // Check if this function has 'override' modifier
-        val hasOverride = fn.node.getChildren(null).any {
-            it.elementType == SabakaTokenTypes.KW_OVERRIDE
-        }
+    private fun checkOverrideValid(fn: SabakaFuncDecl, symbols: SymbolTable, holder: AnnotationHolder) {
+        val hasOverride = fn.node.getChildren(null)
+            .any { it.elementType == SabakaTokenTypes.KW_OVERRIDE }
         if (!hasOverride) return
-
         val name = fn.name ?: return
         val cls = fn.parent?.parent as? SabakaClassDecl ?: return
         val clsName = cls.name ?: return
-
-        // Look up the base class
-        val baseClassName = symbols.classParents[clsName] ?: run {
-            fn.nameIdentifier?.let { id ->
-                holder.newAnnotation(
-                    HighlightSeverity.WARNING,
-                    "'override' on '${name}' but class '${clsName}' has no base class"
-                )
-                    .range(id.textRange)
-                    .create()
-            }
-            return
+        val baseName = symbols.classParents[clsName] ?: run {
+            fn.nameIdentifier?.let {
+                holder.newAnnotation(HighlightSeverity.WARNING,
+                    "'override' on '$name' but '$clsName' has no base class")
+                    .range(it.textRange).create()
+            }; return
         }
-
-        // Check base class has a method with this name
-        val baseHasMethod = symbols.classMethods[baseClassName]?.contains(name) == true
-        if (!baseHasMethod) {
-            fn.nameIdentifier?.let { id ->
-                holder.newAnnotation(
-                    HighlightSeverity.WARNING,
-                    "Method '${name}' is marked override but '${baseClassName}' has no such method"
-                )
-                    .range(id.textRange)
-                    .create()
+        if (symbols.classMethods[baseName]?.contains(name) != true) {
+            fn.nameIdentifier?.let {
+                holder.newAnnotation(HighlightSeverity.WARNING,
+                    "Method '$name' is marked override but '$baseName' has no such method")
+                    .range(it.textRange).create()
             }
         }
     }
 
-    // ── Interface implementation check ────────────────────────────────────────
+    // ── Interface implementation ──────────────────────────────────────────────
 
-    private fun checkInterfaceImplementation(
-        cls: SabakaClassDecl,
-        symbols: SymbolTable,
-        holder: AnnotationHolder
-    ) {
+    private fun checkInterfaceImplementation(cls: SabakaClassDecl, symbols: SymbolTable, holder: AnnotationHolder) {
         val clsName = cls.name ?: return
-        val requiredInterfaces = symbols.classInterfaces[clsName] ?: return
+        val ifaces = symbols.classInterfaces[clsName] ?: return
         val ownMethods = symbols.classMethods[clsName] ?: emptySet()
-
-        for (ifaceName in requiredInterfaces) {
-            val ifaceMethods = symbols.interfaceMethods[ifaceName] ?: continue
-            for (required in ifaceMethods) {
+        for (iface in ifaces) {
+            for (required in symbols.interfaceMethods[iface] ?: emptySet()) {
                 if (required !in ownMethods) {
-                    cls.nameIdentifier?.let { id ->
-                        holder.newAnnotation(
-                            HighlightSeverity.ERROR,
-                            "Class '${clsName}' does not implement interface method '${required}' from '${ifaceName}'"
-                        )
-                            .range(id.textRange)
-                            .create()
+                    cls.nameIdentifier?.let {
+                        holder.newAnnotation(HighlightSeverity.ERROR,
+                            "'$clsName' does not implement '$required' from '$iface'")
+                            .range(it.textRange).create()
                     }
                 }
             }
         }
-    }
-
-    // ── Visible name collection ───────────────────────────────────────────────
-
-    private fun buildVisibleNames(position: PsiElement, symbols: SymbolTable): Set<String> {
-        val names = mutableSetOf<String>()
-        names.addAll(symbols.functions.keys)
-        names.addAll(symbols.classes)
-        names.addAll(symbols.structs)
-        names.addAll(symbols.enums)
-        names.addAll(SabakaBuiltins.GLOBAL_NAMES)
-
-        // Enum member names (e.g. North, South from Direction enum)
-        names.addAll(symbols.enumMembers)
-
-        // Walk enclosing scopes for locals and params
-        var scope: PsiElement? = position.parent
-        while (scope != null) {
-            PsiTreeUtil.getChildrenOfType(scope, SabakaVarDeclStmt::class.java)
-                ?.mapNotNull { it.name }
-                ?.let { names.addAll(it) }
-            PsiTreeUtil.getChildrenOfType(scope, SabakaParam::class.java)
-                ?.mapNotNull { it.name }
-                ?.let { names.addAll(it) }
-            // Inside a class method, fields of the class are visible
-            if (scope is SabakaClassDecl) {
-                symbols.classFields[scope.name]?.let { names.addAll(it) }
-            }
-            if (scope is SabakaFuncDecl || scope is SabakaFile) break
-            scope = scope.parent
-        }
-        return names
     }
 }
 
 // ── Symbol table ──────────────────────────────────────────────────────────────
 
-/**
- * Lightweight symbol table built once per file for all annotation passes.
- *
- * We deliberately keep it simple (no type inference) so it's fast and
- * doesn't recurse into every expression.
- */
 data class FuncInfo(val paramCount: Int)
 
 class SymbolTable private constructor(
-    val functions: Map<String, FuncInfo>,        // top-level function name → info
+    val functions: Map<String, FuncInfo>,
     val classes: Set<String>,
     val structs: Set<String>,
     val enums: Set<String>,
     val enumMembers: Set<String>,
-    val classParents: Map<String, String>,        // class name → base class name
-    val classInterfaces: Map<String, List<String>>, // class name → interface names
-    val classMethods: Map<String, Set<String>>,   // class name → method names
-    val classFields: Map<String, Set<String>>,    // class name → field names
-    val interfaceMethods: Map<String, Set<String>> // interface name → required method names
+    val classParents: Map<String, String>,
+    val classInterfaces: Map<String, List<String>>,
+    val classMethods: Map<String, Set<String>>,
+    val classFields: Map<String, Set<String>>,
+    val interfaceMethods: Map<String, Set<String>>
 ) {
     companion object {
-        // Cache per file — rebuilt when file changes
-        private val cache = com.intellij.util.containers.ContainerUtil.createConcurrentWeakMap<SabakaFile, SymbolTable>()
-
-        fun of(file: SabakaFile): SymbolTable {
-            // Always rebuild: PSI is invalidated on every edit so cache entries die with the file
-            val st = build(file)
-            cache[file] = st
-            return st
-        }
+        fun of(file: SabakaFile): SymbolTable = build(file)
 
         private fun build(file: SabakaFile): SymbolTable {
-            val functions     = mutableMapOf<String, FuncInfo>()
-            val classes       = mutableSetOf<String>()
-            val structs       = mutableSetOf<String>()
-            val enums         = mutableSetOf<String>()
-            val enumMembers   = mutableSetOf<String>()
-            val classParents  = mutableMapOf<String, String>()
-            val classIfaces   = mutableMapOf<String, MutableList<String>>()
-            val classMethods  = mutableMapOf<String, MutableSet<String>>()
-            val classFields   = mutableMapOf<String, MutableSet<String>>()
-            val ifaceMethods  = mutableMapOf<String, MutableSet<String>>()
+            val functions    = mutableMapOf<String, FuncInfo>()
+            val classes      = mutableSetOf<String>()
+            val structs      = mutableSetOf<String>()
+            val enums        = mutableSetOf<String>()
+            val enumMembers  = mutableSetOf<String>()
+            val classParents = mutableMapOf<String, String>()
+            val classIfaces  = mutableMapOf<String, MutableList<String>>()
+            val classMethods = mutableMapOf<String, MutableSet<String>>()
+            val classFields  = mutableMapOf<String, MutableSet<String>>()
+            val ifaceMethods = mutableMapOf<String, MutableSet<String>>()
 
-            // Top-level functions
             PsiTreeUtil.findChildrenOfType(file, SabakaFuncDecl::class.java)
                 .filter { it.parent is SabakaFile }
                 .forEach { fn ->
-                    val name = fn.name ?: return@forEach
-                    val paramCount = PsiTreeUtil.findChildrenOfType(fn.getParamList(), SabakaParam::class.java).size
-                    functions[name] = FuncInfo(paramCount)
+                    val n = fn.name ?: return@forEach
+                    val pc = PsiTreeUtil.findChildrenOfType(fn.getParamList(), SabakaParam::class.java).size
+                    functions[n] = FuncInfo(pc)
                 }
 
-            // Classes
             PsiTreeUtil.findChildrenOfType(file, SabakaClassDecl::class.java).forEach { cls ->
-                val name = cls.name ?: return@forEach
-                classes.add(name)
-
-                // Parse base class / interfaces from AST
-                // We scan tokens: class Name : Base, IFace1, IFace2
+                val n = cls.name ?: return@forEach
+                classes.add(n)
                 var node = cls.node.firstChildNode
-                var colonSeen = false
-                var firstAfterColon = true
+                var colonSeen = false; var firstAfterColon = true
                 while (node != null) {
                     if (node.elementType == SabakaTokenTypes.COLON) { colonSeen = true; node = node.treeNext; continue }
                     if (colonSeen && node.elementType == SabakaTokenTypes.IDENTIFIER) {
-                        val n = node.text
-                        if (firstAfterColon) {
-                            classParents[name] = n   // first after colon is base class
-                            firstAfterColon = false
-                        } else {
-                            classIfaces.getOrPut(name) { mutableListOf() }.add(n)
-                        }
+                        if (firstAfterColon) { classParents[n] = node.text; firstAfterColon = false }
+                        else classIfaces.getOrPut(n) { mutableListOf() }.add(node.text)
                     }
                     if (node.elementType == SabakaElementTypes.CLASS_BODY) break
                     node = node.treeNext
                 }
-
-                // Methods and fields inside the class body
                 val body = cls.getBody() ?: return@forEach
                 PsiTreeUtil.getChildrenOfType(body, SabakaFuncDecl::class.java)
-                    ?.mapNotNull { it.name }
-                    ?.let { classMethods.getOrPut(name) { mutableSetOf() }.addAll(it) }
+                    ?.mapNotNull { it.name }?.let { classMethods.getOrPut(n) { mutableSetOf() }.addAll(it) }
                 PsiTreeUtil.getChildrenOfType(body, SabakaMethodDecl::class.java)
-                    ?.mapNotNull { it.name }
-                    ?.let { classMethods.getOrPut(name) { mutableSetOf() }.addAll(it) }
+                    ?.mapNotNull { it.name }?.let { classMethods.getOrPut(n) { mutableSetOf() }.addAll(it) }
                 PsiTreeUtil.getChildrenOfType(body, SabakaFieldDecl::class.java)
-                    ?.mapNotNull { it.name }
-                    ?.let { classFields.getOrPut(name) { mutableSetOf() }.addAll(it) }
+                    ?.mapNotNull { it.name }?.let { classFields.getOrPut(n) { mutableSetOf() }.addAll(it) }
             }
 
-            // Structs
             PsiTreeUtil.findChildrenOfType(file, SabakaStructDecl::class.java).forEach { st ->
-                val name = st.name ?: return@forEach
-                structs.add(name)
+                val n = st.name ?: return@forEach; structs.add(n)
                 val body = st.getBody() ?: return@forEach
                 PsiTreeUtil.getChildrenOfType(body, SabakaFieldDecl::class.java)
-                    ?.mapNotNull { it.name }
-                    ?.let { classFields.getOrPut(name) { mutableSetOf() }.addAll(it) }
+                    ?.mapNotNull { it.name }?.let { classFields.getOrPut(n) { mutableSetOf() }.addAll(it) }
             }
 
-            // Enums
             PsiTreeUtil.findChildrenOfType(file, SabakaEnumDecl::class.java).forEach { en ->
-                val name = en.name ?: return@forEach
-                enums.add(name)
-                val body = en.getBody() ?: return@forEach
-                PsiTreeUtil.findChildrenOfType(body, SabakaEnumMember::class.java)
-                    .mapNotNull { it.name }
-                    .let { enumMembers.addAll(it) }
+                val n = en.name ?: return@forEach; enums.add(n)
+                PsiTreeUtil.findChildrenOfType(en.getBody() ?: return@forEach, SabakaEnumMember::class.java)
+                    .mapNotNull { it.name }.let { enumMembers.addAll(it) }
             }
 
-            // Interfaces
             PsiTreeUtil.findChildrenOfType(file, SabakaInterfaceDecl::class.java).forEach { iface ->
-                val name = iface.name ?: return@forEach
-                val body = iface.getBody() ?: return@forEach
-                PsiTreeUtil.findChildrenOfType(body, SabakaCompositeElement::class.java)
+                val n = iface.name ?: return@forEach
+                PsiTreeUtil.findChildrenOfType(iface.getBody() ?: return@forEach, SabakaCompositeElement::class.java)
                     .filter { it.node.elementType == SabakaElementTypes.INTERFACE_METHOD }
-                    .mapNotNull { m ->
-                        m.node.findChildByType(SabakaTokenTypes.IDENTIFIER)?.text
-                    }
-                    .let { ifaceMethods.getOrPut(name) { mutableSetOf() }.addAll(it) }
+                    .mapNotNull { it.node.findChildByType(SabakaTokenTypes.IDENTIFIER)?.text }
+                    .let { ifaceMethods.getOrPut(n) { mutableSetOf() }.addAll(it) }
             }
 
-            return SymbolTable(
-                functions     = functions,
-                classes       = classes,
-                structs       = structs,
-                enums         = enums,
-                enumMembers   = enumMembers,
-                classParents  = classParents,
-                classInterfaces = classIfaces,
-                classMethods  = classMethods,
-                classFields   = classFields,
-                interfaceMethods = ifaceMethods
-            )
+            return SymbolTable(functions, classes, structs, enums, enumMembers,
+                classParents, classIfaces, classMethods, classFields, ifaceMethods)
         }
     }
 }
