@@ -72,10 +72,26 @@ class SabakaSymbolRef(
             scope = scope.parent
         }
 
-        // Enum members
         PsiTreeUtil.findChildrenOfType(file, SabakaEnumMember::class.java)
             .firstOrNull { it.name == name }?.let { return it }
 
+        val vFile = file.virtualFile ?: return null
+        for (child in file.children) {
+            val nodeType = child.node?.elementType ?: continue
+            if (nodeType != SabakaElementTypes.IMPORT_STMT) continue
+            val stringNode = child.node.findChildByType(SabakaTokenTypes.STRING_LITERAL) ?: continue
+            val importPath = stringNode.text.removeSurrounding("\"")
+            if (!importPath.endsWith(".sabaka", ignoreCase = true)) continue
+            val importedVFile = vFile.parent?.findFileByRelativePath(importPath) ?: continue
+            val importedPsi = PsiManager.getInstance(file.project).findFile(importedVFile) as? SabakaFile ?: continue
+            // ищем в импортированном файле
+            PsiTreeUtil.findChildrenOfType(importedPsi, SabakaFuncDecl::class.java)
+                .firstOrNull { it.name == name }?.let { return it }
+            PsiTreeUtil.findChildrenOfType(importedPsi, SabakaClassDecl::class.java)
+                .firstOrNull { it.name == name }?.let { return it }
+            PsiTreeUtil.findChildrenOfType(importedPsi, SabakaStructDecl::class.java)
+                .firstOrNull { it.name == name }?.let { return it }
+        }
         return null
     }
 

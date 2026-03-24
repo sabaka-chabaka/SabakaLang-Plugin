@@ -128,24 +128,26 @@ private class ParseContext(private val b: PsiBuilder) {
     private fun parseImport() {
         val m = mark()
         expect(TT.KW_IMPORT)
-        when {
-            at(TT.LBRACE) -> {
-                advance() // {
-                while (!eof() && !at(TT.RBRACE)) {
-                    if (at(TT.IDENTIFIER)) advance()
-                    consume(TT.COMMA)
-                }
-                expect(TT.RBRACE)
-                // optional  from "path"
-                if (at(TT.IDENTIFIER) && text() == "from") advance()
-                if (at(TT.STRING_LITERAL)) advance()
-            }
-            at(TT.STRING_LITERAL) -> advance()
-            at(TT.IDENTIFIER) -> {
+
+        // Путь всегда идёт первым: import "file.sabaka"
+        if (at(TT.STRING_LITERAL)) advance()
+
+        // Опционально: from Foo, Bar
+        if (at(TT.IDENTIFIER) && text() == "from") {
+            advance() // "from"
+            if (at(TT.IDENTIFIER)) advance()
+            while (at(TT.COMMA)) {
                 advance()
-                if (at(TT.EQ)) { advance(); if (at(TT.STRING_LITERAL)) advance() }
+                if (at(TT.IDENTIFIER)) advance()
             }
         }
+
+        // Опционально: as alias
+        if (at(TT.IDENTIFIER) && text() == "as") {
+            advance() // "as"
+            if (at(TT.IDENTIFIER)) advance()
+        }
+
         consume(TT.SEMICOLON)
         m.done(ET.IMPORT_STMT)
     }

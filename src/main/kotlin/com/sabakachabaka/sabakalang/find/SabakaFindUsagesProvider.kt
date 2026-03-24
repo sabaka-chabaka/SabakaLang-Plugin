@@ -1,8 +1,12 @@
 package com.sabakachabaka.sabakalang.find
 
+import com.intellij.lang.cacheBuilder.DefaultWordsScanner
 import com.intellij.lang.findUsages.FindUsagesProvider
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.tree.TokenSet
+import com.sabakachabaka.sabakalang.lexer.SabakaLexer
+import com.sabakachabaka.sabakalang.lexer.SabakaTokenTypes
 import com.sabakachabaka.sabakalang.psi.*
 
 class SabakaFindUsagesProvider : FindUsagesProvider {
@@ -39,5 +43,10 @@ class SabakaFindUsagesProvider : FindUsagesProvider {
         else -> (element as? PsiNamedElement)?.name ?: element.text
     }
 
-    override fun getWordsScanner() = null
+    override fun getWordsScanner() = DefaultWordsScanner(
+        SabakaLexer(),
+        TokenSet.create(SabakaTokenTypes.IDENTIFIER),
+        TokenSet.create(SabakaTokenTypes.COMMENT),
+        TokenSet.create(SabakaTokenTypes.STRING_LITERAL)
+    )
 }
